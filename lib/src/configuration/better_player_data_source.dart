@@ -17,6 +17,9 @@ class BetterPlayerDataSource {
   ///Url of the video
   final String url;
 
+  ///Url of the video ads
+  final String? adsUrl;
+
   ///Subtitles configuration
   final List<BetterPlayerSubtitlesSource>? subtitles;
 
@@ -79,7 +82,8 @@ class BetterPlayerDataSource {
   BetterPlayerDataSource(
     this.type,
     this.url, {
-    this.bytes,
+        this.adsUrl,
+        this.bytes,
     this.subtitles,
     this.liveStream = false,
     this.headers,
@@ -110,7 +114,8 @@ class BetterPlayerDataSource {
   ///Bytes parameter is not used in this data source.
   factory BetterPlayerDataSource.network(
     String url, {
-    List<BetterPlayerSubtitlesSource>? subtitles,
+        String? adsUrl,
+        List<BetterPlayerSubtitlesSource>? subtitles,
     bool? liveStream,
     Map<String, String>? headers,
     bool? useAsmsSubtitles,
@@ -130,6 +135,7 @@ class BetterPlayerDataSource {
     return BetterPlayerDataSource(
       BetterPlayerDataSourceType.network,
       url,
+      adsUrl: adsUrl,
       subtitles: subtitles,
       liveStream: liveStream,
       headers: headers,
@@ -151,7 +157,8 @@ class BetterPlayerDataSource {
   ///Bytes parameter is not used in this data source.
   factory BetterPlayerDataSource.file(
     String url, {
-    List<BetterPlayerSubtitlesSource>? subtitles,
+        String? adsUrl,
+        List<BetterPlayerSubtitlesSource>? subtitles,
     bool? useAsmsSubtitles,
     bool? useAsmsTracks,
     Map<String, String>? qualities,
@@ -163,6 +170,7 @@ class BetterPlayerDataSource {
     return BetterPlayerDataSource(
       BetterPlayerDataSourceType.file,
       url,
+      adsUrl: adsUrl,
       subtitles: subtitles,
       useAsmsSubtitles: useAsmsSubtitles,
       useAsmsTracks: useAsmsTracks,
@@ -209,6 +217,7 @@ class BetterPlayerDataSource {
   BetterPlayerDataSource copyWith({
     BetterPlayerDataSourceType? type,
     String? url,
+    String? adsUrl,
     List<int>? bytes,
     List<BetterPlayerSubtitlesSource>? subtitles,
     bool? liveStream,
@@ -231,6 +240,7 @@ class BetterPlayerDataSource {
     return BetterPlayerDataSource(
       type ?? this.type,
       url ?? this.url,
+      adsUrl: adsUrl ?? this.adsUrl,
       bytes: bytes ?? this.bytes,
       subtitles: subtitles ?? this.subtitles,
       liveStream: liveStream ?? this.liveStream,

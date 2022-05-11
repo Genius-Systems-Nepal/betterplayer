@@ -117,7 +117,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 }
                 val player = BetterPlayer(
                     flutterState?.applicationContext!!, eventChannel, handle,
-                    customDefaultLoadControl, result
+                    customDefaultLoadControl, result, activity!!
                 )
                 videoPlayers.put(handle.id(), player)
             }
@@ -138,6 +138,22 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 onMethodCall(call, result, textureId, player)
             }
         }
+    }
+
+    private fun isAdPlaying(player: BetterPlayer): Boolean {
+        return player.isAdPlaying()
+    }
+
+    private fun contentDuration(player: BetterPlayer) : Long{
+        return player.contentDuration()
+    }
+
+    private fun contentPosition(player: BetterPlayer) : Long {
+        return player.contentPosition()
+    }
+
+    private fun disposeAdView(player: BetterPlayer) {
+        player.removeAdsView()
     }
 
     private fun onMethodCall(
@@ -220,6 +236,16 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 dispose(player, textureId)
                 result.success(null)
             }
+            DISPOSE_AD_VIEW -> disposeAdView(player)
+            IS_AD_PLAYING -> {
+                result.success(isAdPlaying(player))
+            }
+            CONTENT_DURATION -> {
+                result.success(contentDuration(player))
+            }
+            CONTENT_POSITION -> {
+                result.success(contentPosition(player))
+            }
             else -> result.notImplemented()
         }
     }
@@ -251,6 +277,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 key,
                 "asset:///$assetLookupKey",
                 null,
+                null,
                 result,
                 headers,
                 false,
@@ -268,6 +295,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             val maxCacheSize = maxCacheSizeNumber.toLong()
             val maxCacheFileSize = maxCacheFileSizeNumber.toLong()
             val uri = getParameter(dataSource, URI_PARAMETER, "")
+            val adsUri = getParameter(dataSource, ADS_URI_PARAMETER, "")
             val cacheKey = getParameter<String?>(dataSource, CACHE_KEY_PARAMETER, null)
             val formatHint = getParameter<String?>(dataSource, FORMAT_HINT_PARAMETER, null)
             val licenseUrl = getParameter<String?>(dataSource, LICENSE_URL_PARAMETER, null)
@@ -278,6 +306,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 flutterState!!.applicationContext,
                 key,
                 uri,
+                adsUri,
                 formatHint,
                 result,
                 headers,
@@ -491,6 +520,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val ASSET_PARAMETER = "asset"
         private const val PACKAGE_PARAMETER = "package"
         private const val URI_PARAMETER = "uri"
+        private const val ADS_URI_PARAMETER = "ads_url"
         private const val FORMAT_HINT_PARAMETER = "formatHint"
         private const val TEXTURE_ID_PARAMETER = "textureId"
         private const val LOOPING_PARAMETER = "looping"
@@ -545,5 +575,9 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val DISPOSE_METHOD = "dispose"
         private const val PRE_CACHE_METHOD = "preCache"
         private const val STOP_PRE_CACHE_METHOD = "stopPreCache"
+        private const val DISPOSE_AD_VIEW = "disposeAdView"
+        private const val IS_AD_PLAYING = "isAdPlaying"
+        private const val CONTENT_DURATION = "contentDuration"
+        private const val CONTENT_POSITION = "contentPosition"
     }
 }

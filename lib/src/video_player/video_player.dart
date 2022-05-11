@@ -317,7 +317,8 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   /// ClearKey DRM only supported on Android.
   Future<void> setNetworkDataSource(
     String dataSource, {
-    VideoFormat? formatHint,
+        String? adsUrl,
+        VideoFormat? formatHint,
     Map<String, String?>? headers,
     bool useCache = false,
     int? maxCacheSize,
@@ -340,6 +341,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
       DataSource(
         sourceType: DataSourceType.network,
         uri: dataSource,
+        adsUri: adsUrl,
         formatHint: formatHint,
         headers: headers,
         useCache: useCache,
@@ -433,6 +435,22 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   Future<void> play() async {
     value = value.copyWith(isPlaying: true);
     await _applyPlayPause();
+  }
+
+  Future<void> disposeAdView() async {
+    await _videoPlayerPlatform.disposeAdView(_textureId);
+  }
+
+  Future<bool?> isAdPlaying() async {
+    return await _videoPlayerPlatform.isAdPlaying(_textureId);
+  }
+
+  Future<Duration?> contentDuration() async {
+    return await _videoPlayerPlatform.contentDuration(_textureId);
+  }
+
+  Future<Duration?> contentPosition() async {
+    return await _videoPlayerPlatform.contentPosition(_textureId);
   }
 
   /// Sets whether or not the video should loop after playing once. See also
