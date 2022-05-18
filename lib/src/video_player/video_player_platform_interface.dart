@@ -185,6 +185,11 @@ abstract class VideoPlayerPlatform {
     throw UnimplementedError('clearCache() has not been implemented.');
   }
 
+  ///nerdstat
+  Future<void> nerdStat(int? textureId) {
+    throw UnimplementedError('nerdStat() has not been implemented.');
+  }
+
   /// Returns a widget displaying the video with a given textureID.
   Widget buildView(int? textureId) {
     throw UnimplementedError('buildView() has not been implemented.');
@@ -400,6 +405,7 @@ class VideoEvent {
     this.size,
     this.buffered,
     this.position,
+    this.nerdStat,
   });
 
   /// The type of the event.
@@ -427,6 +433,9 @@ class VideoEvent {
 
   ///Seek position
   final Duration? position;
+
+  ///Nerdstat
+  final dynamic nerdStat;
 
   @override
   bool operator ==(Object other) {
@@ -485,6 +494,9 @@ enum VideoEventType {
 
   /// An unknown event has been received.
   unknown,
+
+  /// For nerd stat
+  nerdStat,
 
   adStarted,
   adEnded,

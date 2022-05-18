@@ -1165,6 +1165,12 @@ class BetterPlayerController {
       case VideoEventType.bufferingEnd:
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.bufferingEnd));
         break;
+      case VideoEventType.nerdStat:
+        _postEvent(BetterPlayerEvent(BetterPlayerEventType.nerdStat,
+            parameters: <String, dynamic>{
+              "nerdStat": event.nerdStat,
+            }));
+        break;
       case VideoEventType.adStarted:
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.adStarted));
         break;

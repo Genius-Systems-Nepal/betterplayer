@@ -20,6 +20,7 @@ import android.util.Log
 import android.view.Surface
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.lifecycle.Observer
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequest
@@ -44,6 +45,7 @@ import com.google.android.exoplayer2.trackselection.TrackSelectionOverrides
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
 import com.google.android.exoplayer2.ui.PlayerNotificationManager.BitmapCallback
 import com.google.android.exoplayer2.ui.PlayerNotificationManager.MediaDescriptionAdapter
+import com.google.android.exoplayer2.ui.DefaultTrackNameProvider
 import com.google.android.exoplayer2.upstream.DataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
@@ -88,6 +90,10 @@ internal class BetterPlayer(
     private val customDefaultLoadControl: CustomDefaultLoadControl =
         customDefaultLoadControl ?: CustomDefaultLoadControl()
     private var lastSendBufferedPosition = 0L
+    /// nerdstat
+    var startNerdStat = false
+    var nerdStatHelper: NerdStatHelper? = null
+
     /// Ads
     private val activity = act
     private val adsLayout = FrameLayout(act)
@@ -146,6 +152,14 @@ internal class BetterPlayer(
         adsLoader.setPlayer(exoPlayer)
         workManager = WorkManager.getInstance(context)
         workerObserverMap = HashMap()
+        nerdStatHelper = NerdStatHelper(
+            exoPlayer,
+            TextView(context),
+            eventSink,
+            exoPlayer.getCurrentTrackSelections(),
+            DefaultTrackNameProvider(context.getResources()),
+            context
+        )
         setupVideoPlayer(eventChannel, textureEntry, result)
     }
 

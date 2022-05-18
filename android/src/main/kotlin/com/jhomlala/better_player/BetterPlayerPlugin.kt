@@ -236,6 +236,14 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 dispose(player, textureId)
                 result.success(null)
             }
+            NERD_STAT -> {
+                player.startNerdStat = !player.startNerdStat
+                if (player.startNerdStat) {
+                    player.nerdStatHelper?.init()
+                } else {
+                    player.nerdStatHelper?.onStop()
+                }
+            }
             DISPOSE_AD_VIEW -> disposeAdView(player)
             IS_AD_PLAYING -> {
                 result.success(isAdPlaying(player))
@@ -575,6 +583,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val DISPOSE_METHOD = "dispose"
         private const val PRE_CACHE_METHOD = "preCache"
         private const val STOP_PRE_CACHE_METHOD = "stopPreCache"
+        private const val NERD_STAT = "nerdStat"
         private const val DISPOSE_AD_VIEW = "disposeAdView"
         private const val IS_AD_PLAYING = "isAdPlaying"
         private const val CONTENT_DURATION = "contentDuration"
