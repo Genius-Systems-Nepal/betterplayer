@@ -31,6 +31,17 @@ AVPictureInPictureController *_pipController;
     _isPlaying = false;
     _disposed = false;
     _player = [[AVPlayer alloc] init];
+    
+    BetterPlayerView *playerView = [[BetterPlayerView alloc] initWithFrame:CGRectZero];
+    playerView.player = _player;
+    _thisView = playerView;
+    
+    [self setUpAdsLoader];
+//    _adTagUrlOrAdsResponse = @"https://ap-south-1-prod.ads.expresswifi.com/ads/video?h=720&w=600&api_key=BHPGAIUBVG4QIJIA&apid=3412547012154583&tag=app-10001-0002&skip=5";
+    _isAdTagUrl = TRUE;
+    _contentPlayhead = [[IMAAVPlayerContentPlayhead alloc] initWithAVPlayer:_player];
+//    [self requestAds];
+    
     _player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
     ///Fix for loading large videos
     if (@available(iOS 10.0, *)) {
@@ -64,9 +75,7 @@ AVPictureInPictureController *_pipController;
 }
 
 - (nonnull UIView *)view {
-    BetterPlayerView *playerView = [[BetterPlayerView alloc] initWithFrame:CGRectZero];
-    playerView.player = _player;
-    return playerView;
+    return _thisView;
 }
 
 - (void)addObservers:(AVPlayerItem*)item {
@@ -101,6 +110,7 @@ AVPictureInPictureController *_pipController;
     _disposed = false;
     _failedCount = 0;
     _key = nil;
+    _adTagUrlOrAdsResponse = @"";
     if (_player.currentItem == nil) {
         return;
     }
@@ -219,10 +229,14 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)setDataSourceAsset:(NSString*)asset withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration{
     NSString* path = [[NSBundle mainBundle] pathForResource:asset ofType:nil];
-    return [self setDataSourceURL:[NSURL fileURLWithPath:path] withKey:key withCertificateUrl:certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders: @{} withCache: false cacheKey:cacheKey cacheManager:cacheManager overriddenDuration:overriddenDuration videoExtension: nil];
+    return [self setDataSourceURL:[NSURL fileURLWithPath:path] withKey:key withCertificateUrl:certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders: @{} withCache: false cacheKey:cacheKey cacheManager:cacheManager overriddenDuration:overriddenDuration videoExtension: nil adsUrl:@""];
 }
 
-- (void)setDataSourceURL:(NSURL*)url withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders:(NSDictionary*)headers withCache:(BOOL)useCache cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration videoExtension: (NSString*) videoExtension{
+- (void)setDataSourceURL:(NSURL*)url withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders:(NSDictionary*)headers withCache:(BOOL)useCache cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration videoExtension: (NSString*) videoExtension adsUrl: (NSString*) adsUrl{
+    if (adsUrl != (id)[NSNull null]) {
+        _adTagUrlOrAdsResponse = adsUrl;
+        [self requestAds];
+    }
     _overriddenDuration = 0;
     if (headers == [NSNull null] || headers == NULL){
         headers = @{};
@@ -512,6 +526,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 }
 
 - (void)play {
+    //to stop play or pause when ad is playing
+    if (_isAdsPlaying == TRUE) {
+        return;
+    }
     _stalledCount = 0;
     _isStalledCheckStarted = false;
     _isPlaying = true;
@@ -519,6 +537,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 }
 
 - (void)pause {
+    //to stop play or pause when ad is playing
+    if (_isAdsPlaying == TRUE) {
+        return;
+    }
     _isPlaying = false;
     [self updatePlayingState];
 }
@@ -626,6 +648,58 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         } else {
             // Fallback on earlier versions
         } }
+}
+
+- (void)setUpAdsLoader {
+    if (_adsLoader == NULL) {
+        _adsLoader = [[IMAAdsLoader alloc] initWithSettings: NULL];
+    }
+    _adsLoader.delegate = self;
+}
+
+- (void)requestAds {
+    if ([_adTagUrlOrAdsResponse isEqual: @""]) {
+        return;
+    }
+    // Create ad display container for ad rendering.
+    IMAAdDisplayContainer *adDisplayContainer = [[IMAAdDisplayContainer alloc] initWithAdContainer:self.view viewController:NULL];
+    // Create an ad request with our ad tag, display container, and optional user context.
+    IMAAdsRequest *request;
+    if (_isAdTagUrl) {
+        request = [[IMAAdsRequest alloc] initWithAdTagUrl:_adTagUrlOrAdsResponse adDisplayContainer:adDisplayContainer contentPlayhead:_contentPlayhead userContext:NULL];
+    } else {
+        request = [[IMAAdsRequest alloc] initWithAdsResponse:_adTagUrlOrAdsResponse adDisplayContainer:adDisplayContainer contentPlayhead:_contentPlayhead userContext:NULL];
+    }
+    [_adsLoader requestAdsWithRequest:request];
+}
+
+- (void)adsLoader:(IMAAdsLoader *)loader adsLoadedWithData:(IMAAdsLoadedData *)adsLoadedData {
+    _adsManager = adsLoadedData.adsManager;
+    _adsManager.delegate = self;
+    [_adsManager initializeWithAdsRenderingSettings: NULL];
+}
+
+- (void)adsLoader:(IMAAdsLoader *)loader failedWithErrorData:(IMAAdLoadingErrorData *)adErrorData {
+    [_player play];
+}
+
+- (void)adsManager:(IMAAdsManager *)adsManager didReceiveAdEvent:(IMAAdEvent *)event {
+    // Play each ad once it has been loaded
+    if (event.type == kIMAAdEvent_LOADED) {
+        [_adsManager start];
+    }
+}
+
+- (void)adsManagerDidRequestContentPause:(IMAAdsManager *)adsManager {
+    _eventSink(@{@"event" : @"adStarted"});
+    [self pause];
+    _isAdsPlaying = TRUE;
+}
+
+- (void)adsManagerDidRequestContentResume:(IMAAdsManager *)adsManager {
+    _eventSink(@{@"event" : @"adEnded"});
+    _isAdsPlaying = FALSE;
+    [self play];
 }
 
 #if TARGET_OS_IOS

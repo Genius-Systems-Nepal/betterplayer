@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 import 'dart:async';
+
 import 'package:better_player/src/configuration/better_player_buffering_configuration.dart';
 import 'package:better_player/src/core/better_player_utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+
 import 'video_player_platform_interface.dart';
 
 const MethodChannel _channel = MethodChannel('better_player_channel');
@@ -87,6 +89,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
         dataSourceDescription = <String, dynamic>{
           'key': dataSource.key,
           'uri': dataSource.uri,
+          'ads_url': dataSource.adsUri,
           'formatHint': dataSource.rawFormalHint,
           'headers': dataSource.headers,
           'useCache': dataSource.useCache,
@@ -160,6 +163,44 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
       'pause',
       <String, dynamic>{'textureId': textureId},
     );
+  }
+
+  @override
+  Future<void> disposeAdView(int? textureId) {
+    return _channel.invokeMethod<void>(
+      'disposeAdView',
+      <String, dynamic>{'textureId': textureId},
+    );
+  }
+
+  @override
+  Future<bool?> isAdPlaying(int? textureId) async {
+    return await _channel.invokeMethod<bool>(
+      'isAdPlaying',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
+  Future<Duration> contentDuration(int? textureId) async {
+    return Duration(
+        milliseconds: await _channel.invokeMethod<int>(
+              'contentDuration',
+              <String, dynamic>{'textureId': textureId},
+            ) ??
+            -1);
+  }
+
+  @override
+  Future<Duration> contentPosition(int? textureId) async {
+    return Duration(
+        milliseconds: await _channel.invokeMethod<int>(
+              'contentPosition',
+              <String, dynamic>{'textureId': textureId},
+            ) ??
+            -1);
   }
 
   @override
@@ -425,6 +466,12 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
               eventType: VideoEventType.nerdStat,
               key: key,
               nerdStat: values);
+
+        case 'adStarted':
+          return VideoEvent(eventType: VideoEventType.adStarted, key: key);
+
+        case 'adEnded':
+          return VideoEvent(eventType: VideoEventType.adEnded, key: key);
 
         default:
           return VideoEvent(

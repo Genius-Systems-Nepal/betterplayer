@@ -155,6 +155,24 @@ abstract class VideoPlayerPlatform {
         'isPictureInPictureEnabled() has not been implemented.');
   }
 
+  ///Remove ad views
+  Future<void> disposeAdView(int? textureId) {
+    throw UnimplementedError('disposeAdView() has not been implemented.');
+  }
+
+  ///is Ad playing
+  Future<bool?> isAdPlaying(int? textureId) {
+    throw UnimplementedError('disposeAdView() has not been implemented.');
+  }
+
+  Future<Duration?> contentDuration(int? textureId) {
+    throw UnimplementedError('contentDuration() has not been implemented.');
+  }
+
+  Future<Duration?> contentPosition(int? textureId) {
+    throw UnimplementedError('contentPosition() has not been implemented.');
+  }
+
   Future<void> setAudioTrack(int? textureId, String? name, int? index) {
     throw UnimplementedError('setAudio() has not been implemented.');
   }
@@ -212,6 +230,7 @@ class DataSource {
   DataSource({
     required this.sourceType,
     this.uri,
+    this.adsUri,
     this.formatHint,
     this.asset,
     this.package,
@@ -248,6 +267,8 @@ class DataSource {
   /// This will be in different formats depending on the [DataSourceType] of
   /// the original video.
   final String? uri;
+  /// ads uri
+  final String? adsUri;
 
   /// **Android only**. Will override the platform's generic file format
   /// detection with whatever is set here.
@@ -331,7 +352,7 @@ class DataSource {
 
   @override
   String toString() {
-    return 'DataSource{sourceType: $sourceType, uri: $uri certificateUrl: $certificateUrl, formatHint:'
+    return 'DataSource{sourceType: $sourceType, uri: $uri certificateUrl: $certificateUrl,ads_uri: $adsUri,  formatHint:'
         ' $formatHint, asset: $asset, package: $package, headers: $headers,'
         ' useCache: $useCache,maxCacheSize: $maxCacheSize, maxCacheFileSize: '
         '$maxCacheFileSize, showNotification: $showNotification, title: $title,'
@@ -476,6 +497,9 @@ enum VideoEventType {
 
   /// For nerd stat
   nerdStat,
+
+  adStarted,
+  adEnded,
 }
 
 /// Describes a discrete segment of time within a video using a [start] and
