@@ -26,4 +26,6 @@ enum BetterPlayerEventType {
   bufferingEnd,
   changedPlaylistItem,
   nerdStat,
+  adStarted,
+  adEnded,
 }
