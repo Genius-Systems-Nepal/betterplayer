@@ -254,29 +254,29 @@ internal class BetterPlayer(
         } else {
             drmSessionManager = null
         }
-        if (uri.toString().contains("rtmp")) {
+       /* if (uri.toString().contains("rtmp")) {
             dataSourceFactory = buildRtmp()
-        }else if (isHTTP(uri)) {
+        }else*/ if (isHTTP(uri)) {
             dataSourceFactory = getDataSourceFactory(userAgent, headers)
-//            if (useCache && maxCacheSize > 0 && maxCacheFileSize > 0) {
-//                dataSourceFactory = CacheDataSourceFactory(
-//                    context,
-//                    maxCacheSize,
-//                    maxCacheFileSize,
-//                    dataSourceFactory
-//                )
-//            }
+            if (useCache && maxCacheSize > 0 && maxCacheFileSize > 0) {
+                dataSourceFactory = CacheDataSourceFactory(
+                    context,
+                    maxCacheSize,
+                    maxCacheFileSize,
+                    dataSourceFactory
+                )
+            }
         } else {
             dataSourceFactory = DefaultDataSource.Factory(context)
         }
-        buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
-//        val mediaSource = buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
-//        if (overriddenDuration != 0L) {
-//            val clippingMediaSource = ClippingMediaSource(mediaSource, 0, overriddenDuration * 1000)
-//            exoPlayer?.setMediaSource(clippingMediaSource)
-//        } else {
-//            exoPlayer?.setMediaSource(mediaSource)
-//        }
+//        buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
+        val mediaSource = buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
+        if (overriddenDuration != 0L) {
+            val clippingMediaSource = ClippingMediaSource(mediaSource, 0, overriddenDuration * 1000)
+            exoPlayer?.setMediaSource(clippingMediaSource)
+        } else {
+            exoPlayer?.setMediaSource(mediaSource)
+        }
         exoPlayer?.prepare()
         exoPlayer?.playWhenReady = true
         result.success(null)
@@ -463,25 +463,23 @@ internal class BetterPlayer(
         formatHint: String?,
         cacheKey: String?,
         context: Context
-    ) {
-//        val type: Int
-        @C.ContentType val type: Int = Util.inferContentType(uri, null)
-
-//        if (formatHint == null) {
-//            var lastPathSegment = uri.lastPathSegment
-//            if (lastPathSegment == null) {
-//                lastPathSegment = ""
-//            }
-//            type = Util.inferContentType(lastPathSegment)
-//        } else {
-//            type = when (formatHint) {
-//                FORMAT_SS -> C.TYPE_SS
-//                FORMAT_DASH -> C.TYPE_DASH
-//                FORMAT_HLS -> C.TYPE_HLS
-//                FORMAT_OTHER -> C.TYPE_OTHER
-//                else -> -1
-//            }
-//        }
+    ) : MediaSource {
+        val type: Int
+        if (formatHint == null) {
+            var lastPathSegment = uri.lastPathSegment
+            if (lastPathSegment == null) {
+                lastPathSegment = ""
+            }
+            type = Util.inferContentType(uri, null)
+        } else {
+            type = when (formatHint) {
+                FORMAT_SS -> C.TYPE_SS
+                FORMAT_DASH -> C.TYPE_DASH
+                FORMAT_HLS -> C.TYPE_HLS
+                FORMAT_OTHER -> C.TYPE_OTHER
+                else -> -1
+            }
+        }
         val mediaItemBuilder = MediaItem.Builder()
         mediaItemBuilder.setUri(uri)
         if (adsUri != null) {
@@ -496,7 +494,7 @@ internal class BetterPlayer(
         drmSessionManager?.let { drmSessionManager ->
             drmSessionManagerProvider = DrmSessionManagerProvider { drmSessionManager }
         }
-        val mediaSource = when (type) {
+        return when (type) {
             C.TYPE_SS -> SsMediaSource.Factory(
                 DefaultSsChunkSource.Factory(mediaDataSourceFactory),
                 DefaultDataSource.Factory(context, mediaDataSourceFactory)
@@ -522,10 +520,10 @@ internal class BetterPlayer(
                 throw IllegalStateException("Unsupported type: $type")
             }
         }
-
-        exoPlayer?.setMediaSource(mediaSource)
-        exoPlayer?.setMediaItem(mediaItem)
-        exoPlayer?.playWhenReady = true
+//
+//        exoPlayer?.setMediaSource(mediaSource)
+//        exoPlayer?.setMediaItem(mediaItem)
+//        exoPlayer?.playWhenReady = true
     }
 
     private fun setupVideoPlayer(
