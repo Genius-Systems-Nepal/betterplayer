@@ -188,11 +188,11 @@ internal class BetterPlayer(
     }
 
     fun contentDuration(): Long{
-        return exoPlayer?.duration
+        return exoPlayer?.duration ?: 0
     }
 
     fun contentPosition(): Long {
-        return exoPlayer?.contentPosition
+        return exoPlayer?.contentPosition ?: 0
     }
 
     fun setDataSource(
