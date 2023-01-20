@@ -270,7 +270,7 @@ class BetterPlayerController {
       _setupSubtitles();
     }
 
-    ///Process data so
+    ///Process data source
     await _setupDataSource(betterPlayerDataSource);
     setTrack(BetterPlayerAsmsTrack.defaultTrack());
   }
@@ -958,7 +958,7 @@ class BetterPlayerController {
     final position = await videoPlayerController!.position;
     final wasPlayingBeforeChange = isPlaying()!;
     pause();
-    await setupDataSource(betterPlayerDataSource!.copyWith(url: url,adsUrl: adsUrl));
+    await setupDataSource(betterPlayerDataSource!.copyWith(url: url, adsUrl: adsUrl));
     seekTo(position!);
     if (wasPlayingBeforeChange) {
       play();
@@ -1168,7 +1168,6 @@ class BetterPlayerController {
       case VideoEventType.bufferingEnd:
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.bufferingEnd));
         break;
-
       case VideoEventType.nerdStat:
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.nerdStat,
             parameters: <String, dynamic>{

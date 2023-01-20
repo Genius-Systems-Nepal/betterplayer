@@ -17,12 +17,12 @@ import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.C
 import android.media.AudioManager
 import android.os.Handler
+import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.decoder.DecoderCounters
-import com.jhomlala.better_player.DemoUtil
 import java.util.HashMap
 
 class NerdStatHelper(
-    private val exoPlayer: SimpleExoPlayer,
+    private val exoPlayer: ExoPlayer,
     textView: TextView?,
     private val eventSink: QueuingEventSink,
     private var trackSelections: TrackSelectionArray,

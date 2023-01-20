@@ -46,12 +46,12 @@ AVPictureInPictureController *_pipController;
     if (@available(iOS 10.0, *)) {
         _player.automaticallyWaitsToMinimizeStalling = false;
     }
-    
+
     self._observersAdded = false;
     return self;
 }
 
--(void)toggleNerdStat {
+- (void)toggleNerdStat {
     if (nerdStatActive == TRUE) {
         [nerdStatTimer invalidate];
         nerdStatTimer = nil;
@@ -65,12 +65,12 @@ AVPictureInPictureController *_pipController;
     }
 }
 
--(void)nerdStat:(NSTimer *)timer {
+- (void)nerdStat:(NSTimer *)timer {
     if (_eventSink == nil) {
         return;
     }
     NSString *data = [[[NerdStatHelper alloc] init] getNerdStatTextWithPlayer: _player];
-    
+
     _eventSink(@{ @"event" : @"nerdStat", @"values" : data});
 }
 
@@ -232,7 +232,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     return [self setDataSourceURL:[NSURL fileURLWithPath:path] withKey:key withCertificateUrl:certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders: @{} withCache: false cacheKey:cacheKey cacheManager:cacheManager overriddenDuration:overriddenDuration videoExtension: nil adsUrl:@""];
 }
 
-- (void)setDataSourceURL:(NSURL*)url withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders:(NSDictionary*)headers withCache:(BOOL)useCache cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration videoExtension: (NSString*) videoExtension adsUrl: (NSString*) adsUrl {
+- (void)setDataSourceURL:(NSURL*)url withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders:(NSDictionary*)headers withCache:(BOOL)useCache cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration videoExtension: (NSString*) videoExtension adsUrl: (NSString*) adsUrl{
     if (adsUrl != (id)[NSNull null]) {
         _adTagUrlOrAdsResponse = adsUrl;
         [self requestAds];
@@ -600,20 +600,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         result([FlutterError errorWithCode:@"unsupported_speed"
                                    message:@"Speed must be >= 0.0 and <= 2.0"
                                    details:nil]);
-    } else if ((speed > 1.0 && _player.currentItem.canPlayFastForward) ||
-               (speed < 1.0 && _player.currentItem.canPlaySlowForward)) {
+    } else {
         _playerRate = speed;
         result(nil);
-    } else {
-        if (speed > 1.0) {
-            result([FlutterError errorWithCode:@"unsupported_fast_forward"
-                                       message:@"This video cannot be played fast forward"
-                                       details:nil]);
-        } else {
-            result([FlutterError errorWithCode:@"unsupported_slow_forward"
-                                       message:@"This video cannot be played slow forward"
-                                       details:nil]);
-        }
     }
 
     if (_isPlaying){
@@ -662,7 +651,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         return;
     }
     // Create ad display container for ad rendering.
-    IMAAdDisplayContainer *adDisplayContainer = [[IMAAdDisplayContainer alloc] initWithAdContainer: self.view];
+    IMAAdDisplayContainer *adDisplayContainer = [[IMAAdDisplayContainer alloc] initWithAdContainer:self.view viewController:NULL];
     // Create an ad request with our ad tag, display container, and optional user context.
     IMAAdsRequest *request;
     if (_isAdTagUrl) {

@@ -311,7 +311,7 @@ bool _remoteCommandsInitialized = false;
             NSNumber* maxCacheSize = dataSource[@"maxCacheSize"];
             NSString* videoExtension = dataSource[@"videoExtension"];
             NSString* adsUrl = dataSource[@"ads_url"];
-            
+
             int overriddenDuration = 0;
             if ([dataSource objectForKey:@"overriddenDuration"] != [NSNull null]){
                 overriddenDuration = [dataSource[@"overriddenDuration"] intValue];
@@ -468,12 +468,11 @@ bool _remoteCommandsInitialized = false;
                 }
             }
             result(nil);
-        } else if ([@"startNerdStat" isEqualToString:call.method]) {
+        } else if ([@"nerdStat" isEqualToString:call.method]) {
             NSDictionary* argsMap = call.arguments;
             int64_t textureId = ((NSNumber*)argsMap[@"textureId"]).unsignedIntegerValue;
             BetterPlayer* player = _players[@(textureId)];
             [player toggleNerdStat];
-            
         } else {
             result(FlutterMethodNotImplemented);
         }

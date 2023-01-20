@@ -190,6 +190,11 @@ abstract class VideoPlayerPlatform {
     throw UnimplementedError('clearCache() has not been implemented.');
   }
 
+  ///nerdstat
+  Future<void> nerdStat(int? textureId) {
+    throw UnimplementedError('nerdStat() has not been implemented.');
+  }
+
   /// Returns a widget displaying the video with a given textureID.
   Widget buildView(int? textureId) {
     throw UnimplementedError('buildView() has not been implemented.');
@@ -267,6 +272,7 @@ class DataSource {
   /// This will be in different formats depending on the [DataSourceType] of
   /// the original video.
   final String? uri;
+  /// ads uri
   final String? adsUri;
 
   /// **Android only**. Will override the platform's generic file format
@@ -404,8 +410,7 @@ class VideoEvent {
     this.size,
     this.buffered,
     this.position,
-    this.bitrate,
-    this.nerdStat
+    this.nerdStat,
   });
 
   /// The type of the event.
@@ -434,8 +439,7 @@ class VideoEvent {
   ///Seek position
   final Duration? position;
 
-  final dynamic bitrate;
-
+  ///Nerdstat
   final dynamic nerdStat;
 
   @override
@@ -496,6 +500,7 @@ enum VideoEventType {
   /// An unknown event has been received.
   unknown,
 
+  /// For nerd stat
   nerdStat,
 
   adStarted,
