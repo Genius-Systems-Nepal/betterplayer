@@ -103,9 +103,6 @@ internal class BetterPlayer(
     var startNerdStat = false
     var nerdStatHelper: NerdStatHelper? = null
     val adsMediaSourceFactory : MediaSourceFactory? = null
-    var mIsDvr:Boolean=false
-    var mIsDvrCheck:Boolean=false
-    var mDvrSeekPosition:Long=0L
     init {
         val loadBuilder = DefaultLoadControl.Builder()
         loadBuilder.setBufferDurationsMs(
@@ -201,8 +198,6 @@ internal class BetterPlayer(
         key: String?,
         dataSource: String?,
         adsLink: String?,
-        isDvr: Boolean=false,
-        dvrSeekPosition: Long=0L,
         formatHint: String?,
         result: MethodChannel.Result,
         headers: Map<String, String>?,
@@ -219,8 +214,6 @@ internal class BetterPlayer(
         isInitialized = false
         var adsUri: Uri? = null
         val uri: Uri = Uri.parse(dataSource)
-        var isDvr:Boolean=isDvr
-        var dvrSeekPosition:Long=dvrSeekPosition
         if (adsLink != null && !adsLink.isEmpty()) {
             adsUri = Uri.parse(adsLink)
         }
@@ -288,7 +281,7 @@ internal class BetterPlayer(
             dataSourceFactory = DefaultDataSourceFactory(context, userAgent)
         }
         Log.d("PlayerDVR", "PlayerURL" + uri)
-        buildMediaSource(uri, adsUri,isDvr,dvrSeekPosition, dataSourceFactory, formatHint, cacheKey, context)
+        buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
 //        if (overriddenDuration != 0L) {
 //            val clippingMediaSource = ClippingMediaSource(mediaSource, 0, overriddenDuration * 1000)
 //            exoPlayer!!.setMediaSource(clippingMediaSource)
@@ -538,15 +531,11 @@ internal class BetterPlayer(
 
     private fun buildMediaSource(
         uri: Uri,adsUri: Uri?,
-         isDvr: Boolean=false,
-         dvrSeekPosition: Long=0L,
         mediaDataSourceFactory: DataSource.Factory,
         formatHint: String?,
         cacheKey: String?,
         context: Context
     ) {
-        mIsDvr = isDvr
-        mDvrSeekPosition = dvrSeekPosition
 //        val type: Int
         @C.ContentType val type: Int = Util.inferContentType(uri, null)
 
@@ -646,18 +635,7 @@ internal class BetterPlayer(
                             if (!isInitialized) {
                                 isInitialized = true
                                 sendInitialized()
-                            Log.d("PlayerDVR", "DVRRRRRRRR checckkkkkkkk" + mIsDvrCheck.toString())
                             }
-                        /*Handler().postDelayed({
-                            if (mIsDvr) {
-                                exoPlayer?.playWhenReady = false
-                                exoPlayer?.seekTo(mDvrSeekPosition)
-                                exoPlayer?.playWhenReady = true
-                                Log.d("PlayerDVR", "SEEEEEk" + mDvrSeekPosition.toString())
-                                mIsDvr = false;
-                            }
-                            //doSomethingHere()
-                        }, 2000)*/
 
 
                         val event: MutableMap<String, Any> = HashMap()
@@ -712,10 +690,6 @@ internal class BetterPlayer(
             )
         }
     }
-
-  fun  playWhenReady(value: Boolean){
-      exoPlayer?.playWhenReady = value
-  }
 
     fun play() {
         exoPlayer?.play()

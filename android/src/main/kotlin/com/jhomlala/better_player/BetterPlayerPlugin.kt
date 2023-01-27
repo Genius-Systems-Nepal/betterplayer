@@ -240,13 +240,6 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 }
             }
 
-            PLAY_WHEN_READY_TRUE -> {
-                player.playWhenReady(true)
-            }
-            PLAY_WHEN_READY_FALSe -> {
-                player.playWhenReady(false)
-            }
-
             else -> result.notImplemented()
         }
     }
@@ -299,8 +292,6 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             val maxCacheFileSize = maxCacheFileSizeNumber.toLong()
             val uri = getParameter(dataSource, URI_PARAMETER, "")
             val adsUri = getParameter(dataSource, ADS_URI_PARAMETER, "")
-            val isDVR = getParameter(dataSource, IS_DVR, false)
-            val dvrSeekPosition = getParameter(dataSource, DVR_SEEK_POSITION, 0L)
             val cacheKey = getParameter<String?>(dataSource, CACHE_KEY_PARAMETER, null)
             val formatHint = getParameter<String?>(dataSource, FORMAT_HINT_PARAMETER, null)
             val licenseUrl = getParameter<String?>(dataSource, LICENSE_URL_PARAMETER, null)
