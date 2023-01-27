@@ -122,13 +122,13 @@ class BetterPlayerDataSource {
     Map<String, String>? qualities,
     BetterPlayerCacheConfiguration? cacheConfiguration,
     BetterPlayerNotificationConfiguration notificationConfiguration =
-    const BetterPlayerNotificationConfiguration(showNotification: false),
+        const BetterPlayerNotificationConfiguration(showNotification: false),
     Duration? overriddenDuration,
     BetterPlayerVideoFormat? videoFormat,
     BetterPlayerDrmConfiguration? drmConfiguration,
     Widget? placeholder,
     BetterPlayerBufferingConfiguration bufferingConfiguration =
-    const BetterPlayerBufferingConfiguration(),
+        const BetterPlayerBufferingConfiguration(),
   }) {
     return BetterPlayerDataSource(
       BetterPlayerDataSourceType.network,
@@ -165,18 +165,18 @@ class BetterPlayerDataSource {
     Widget? placeholder,
   }) {
     return BetterPlayerDataSource(
-        BetterPlayerDataSourceType.file,
-        url,
-        adsUrl: adsUrl,
-        subtitles: subtitles,
-        useAsmsSubtitles: useAsmsSubtitles,
-        useAsmsTracks: useAsmsTracks,
-    resolutions: qualities,
-    cacheConfiguration: cacheConfiguration,
-        notificationConfiguration: notificationConfiguration =
-        const BetterPlayerNotificationConfiguration(showNotification: false),
-    overriddenDuration: overriddenDuration,
-    placeholder: placeholder,
+      BetterPlayerDataSourceType.file,
+      url,
+      adsUrl: adsUrl,
+      subtitles: subtitles,
+      useAsmsSubtitles: useAsmsSubtitles,
+      useAsmsTracks: useAsmsTracks,
+      resolutions: qualities,
+      cacheConfiguration: cacheConfiguration,
+      notificationConfiguration: notificationConfiguration =
+          const BetterPlayerNotificationConfiguration(showNotification: false),
+      overriddenDuration: overriddenDuration,
+      placeholder: placeholder,
     );
   }
 
@@ -204,7 +204,7 @@ class BetterPlayerDataSource {
       resolutions: qualities,
       cacheConfiguration: cacheConfiguration,
       notificationConfiguration: notificationConfiguration =
-      const BetterPlayerNotificationConfiguration(showNotification: false),
+          const BetterPlayerNotificationConfiguration(showNotification: false),
       overriddenDuration: overriddenDuration,
       placeholder: placeholder,
     );
@@ -224,14 +224,14 @@ class BetterPlayerDataSource {
     Map<String, String>? resolutions,
     BetterPlayerCacheConfiguration? cacheConfiguration,
     BetterPlayerNotificationConfiguration? notificationConfiguration =
-    const BetterPlayerNotificationConfiguration(showNotification: false),
+        const BetterPlayerNotificationConfiguration(showNotification: false),
     Duration? overriddenDuration,
     BetterPlayerVideoFormat? videoFormat,
     String? videoExtension,
     BetterPlayerDrmConfiguration? drmConfiguration,
     Widget? placeholder,
     BetterPlayerBufferingConfiguration? bufferingConfiguration =
-    const BetterPlayerBufferingConfiguration(),
+        const BetterPlayerBufferingConfiguration(),
   }) {
     return BetterPlayerDataSource(
       type ?? this.type,
@@ -247,14 +247,14 @@ class BetterPlayerDataSource {
       resolutions: resolutions ?? this.resolutions,
       cacheConfiguration: cacheConfiguration ?? this.cacheConfiguration,
       notificationConfiguration:
-      notificationConfiguration ?? this.notificationConfiguration,
+          notificationConfiguration ?? this.notificationConfiguration,
       overriddenDuration: overriddenDuration ?? this.overriddenDuration,
       videoFormat: videoFormat ?? this.videoFormat,
       videoExtension: videoExtension ?? this.videoExtension,
       drmConfiguration: drmConfiguration ?? this.drmConfiguration,
       placeholder: placeholder ?? this.placeholder,
       bufferingConfiguration:
-      bufferingConfiguration ?? this.bufferingConfiguration,
+          bufferingConfiguration ?? this.bufferingConfiguration,
     );
   }
 }

@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 import 'dart:async';
+
 import 'package:better_player/src/configuration/better_player_buffering_configuration.dart';
 import 'package:better_player/src/core/better_player_utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+
 import 'video_player_platform_interface.dart';
 
 const MethodChannel _channel = MethodChannel('better_player_channel');
@@ -27,9 +29,9 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> startNerdStat(int? textureId) async{
+  Future<void> nerdStat(int? textureId) async{
     return await _channel.invokeMethod<void>(
-      'startNerdStat',
+      'nerdStat',
       <String, dynamic>{
         'textureId': textureId,
       },
@@ -192,7 +194,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<bool?> isAdPlaying(int? textureId) async{
+  Future<bool?> isAdPlaying(int? textureId) async {
     return await _channel.invokeMethod<bool>(
       'isAdPlaying',
       <String, dynamic>{
@@ -200,7 +202,6 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
       },
     );
   }
-
 
   @override
   Future<void> setVolume(int? textureId, double volume) {
@@ -426,13 +427,11 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
             key: key,
             duration: Duration(milliseconds: map['duration'] as int),
             size: size,
-            bitrate: map["bitrate"],
           );
         case 'completed':
           return VideoEvent(
             eventType: VideoEventType.completed,
             key: key,
-            bitrate: map["bitrate"],
           );
         case 'bufferingUpdate':
           final List<dynamic> values = map['values'] as List;
@@ -441,52 +440,47 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
             eventType: VideoEventType.bufferingUpdate,
             key: key,
             buffered: values.map<DurationRange>(_toDurationRange).toList(),
-            bitrate: map["bitrate"],
           );
         case 'bufferingStart':
           return VideoEvent(
             eventType: VideoEventType.bufferingStart,
             key: key,
-            bitrate: map["bitrate"],
           );
         case 'bufferingEnd':
           return VideoEvent(
             eventType: VideoEventType.bufferingEnd,
             key: key,
-            bitrate: map["bitrate"],
           );
 
         case 'play':
           return VideoEvent(
-              eventType: VideoEventType.play,
-              key: key,
-              bitrate: map["bitrate"]);
+            eventType: VideoEventType.play,
+            key: key,
+          );
 
         case 'pause':
           return VideoEvent(
-              eventType: VideoEventType.pause,
-              key: key,
-              bitrate: map["bitrate"]);
+            eventType: VideoEventType.pause,
+            key: key,
+          );
 
         case 'seek':
           return VideoEvent(
-              eventType: VideoEventType.seek,
-              key: key,
-              position: Duration(milliseconds: map['position'] as int),
-              bitrate: map["bitrate"]);
+            eventType: VideoEventType.seek,
+            key: key,
+            position: Duration(milliseconds: map['position'] as int),
+          );
 
         case 'pipStart':
           return VideoEvent(
             eventType: VideoEventType.pipStart,
             key: key,
-            bitrate: map["bitrate"],
           );
 
         case 'pipStop':
           return VideoEvent(
             eventType: VideoEventType.pipStop,
             key: key,
-            bitrate: map["bitrate"],
           );
 
         case 'nerdStat':
@@ -497,20 +491,15 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
               nerdStat: values);
 
         case 'adStarted':
-          return VideoEvent(
-              eventType: VideoEventType.adStarted,
-              key: key);
+          return VideoEvent(eventType: VideoEventType.adStarted, key: key);
 
         case 'adEnded':
-          return VideoEvent(
-              eventType: VideoEventType.adEnded,
-              key: key);
+          return VideoEvent(eventType: VideoEventType.adEnded, key: key);
 
         default:
           return VideoEvent(
             eventType: VideoEventType.unknown,
             key: key,
-            bitrate: map["bitrate"],
           );
       }
     });

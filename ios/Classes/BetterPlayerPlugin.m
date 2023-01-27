@@ -311,7 +311,7 @@ bool _remoteCommandsInitialized = false;
             NSNumber* maxCacheSize = dataSource[@"maxCacheSize"];
             NSString* videoExtension = dataSource[@"videoExtension"];
             NSString* adsUrl = dataSource[@"ads_url"];
-            
+
             int overriddenDuration = 0;
             if ([dataSource objectForKey:@"overriddenDuration"] != [NSNull null]){
                 overriddenDuration = [dataSource[@"overriddenDuration"] intValue];
@@ -340,8 +340,7 @@ bool _remoteCommandsInitialized = false;
                 }
                 [player setDataSourceAsset:assetPath withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration];
             } else if (uriArg) {
-                [player setDataSourceURL:[NSURL URLWithString:uriArg] withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl withHeaders:headers withCache: useCache cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration videoExtension: videoExtension
-                    adsUrl: adsUrl];
+                [player setDataSourceURL:[NSURL URLWithString:uriArg] withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl withHeaders:headers withCache: useCache cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration videoExtension: videoExtension adsUrl: adsUrl];
             } else {
                 result(FlutterMethodNotImplemented);
             }
@@ -468,12 +467,11 @@ bool _remoteCommandsInitialized = false;
                 }
             }
             result(nil);
-        } else if ([@"startNerdStat" isEqualToString:call.method]) {
+        } else if ([@"nerdStat" isEqualToString:call.method]) {
             NSDictionary* argsMap = call.arguments;
             int64_t textureId = ((NSNumber*)argsMap[@"textureId"]).unsignedIntegerValue;
             BetterPlayer* player = _players[@(textureId)];
             [player toggleNerdStat];
-            
         } else {
             result(FlutterMethodNotImplemented);
         }

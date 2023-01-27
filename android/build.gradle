@@ -1,9 +1,8 @@
-group 'com.jhomlala.better_player'
-version '0.0.77'
+group 'com.jhomlala.better_player.better_player'
+version '1.0-SNAPSHOT'
 
 buildscript {
-
-    ext.exoPlayerVersion = "2.15.1"
+    ext.exoPlayerVersion = "2.17.1"
     ext.lifecycleVersion = "2.4.0-beta01"
     ext.annotationVersion = "1.2.0"
     ext.workVersion = "2.7.0"
@@ -22,6 +21,11 @@ buildscript {
         mavenCentral()
         jcenter()
     }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:4.1.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
+    }
 }
 
 rootProject.allprojects {
@@ -38,18 +42,21 @@ apply plugin: 'kotlin-android'
 android {
     compileSdkVersion 31
 
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+    }
+
     defaultConfig {
-        minSdkVersion 17
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-    }
-    lintOptions {
-        disable 'InvalidPackage'
-    }
-    android {
-        compileOptions {
-            sourceCompatibility 1.8
-            targetCompatibility 1.8
-        }
+        minSdkVersion 16
     }
 
     dependencies {
@@ -66,18 +73,11 @@ android {
         implementation "androidx.work:work-runtime:$workVersion"
         implementation "com.google.android.exoplayer:extension-ima:$exoPlayerVersion"
         implementation "com.google.android.exoplayer:extension-rtmp:$exoPlayerVersion"
-
-
     }
 }
-dependencies {
-    implementation "androidx.core:core-ktx:$coreVersion"
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion"
-}
-repositories {
-    mavenCentral()
-    jcenter()
 
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion"
 }
 
 
