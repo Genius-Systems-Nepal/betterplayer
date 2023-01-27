@@ -20,9 +20,6 @@ class BetterPlayerDataSource {
   ///Url of the video ads
   final String? adsUrl;
 
-  final bool? isDvr;
-  final int? dvrSeekPosition;
-
   ///Subtitles configuration
   final List<BetterPlayerSubtitlesSource>? subtitles;
 
@@ -85,8 +82,6 @@ class BetterPlayerDataSource {
   BetterPlayerDataSource(this.type,
       this.url, {
         this.adsUrl,
-        this.isDvr,
-        this.dvrSeekPosition,
         this.bytes,
         this.subtitles,
         this.liveStream = false,
@@ -118,8 +113,6 @@ class BetterPlayerDataSource {
   ///Bytes parameter is not used in this data source.
   factory BetterPlayerDataSource.network(String url, {
     String? adsUrl,
-    bool? isDvr,
-    int? dvrSeekPosition,
     List<BetterPlayerSubtitlesSource>? subtitles,
     bool? liveStream,
     Map<String, String>? headers,
@@ -141,8 +134,6 @@ class BetterPlayerDataSource {
       BetterPlayerDataSourceType.network,
       url,
       adsUrl: adsUrl,
-      isDvr: isDvr,
-      dvrSeekPosition: dvrSeekPosition,
       subtitles: subtitles,
       liveStream: liveStream,
       headers: headers,
@@ -164,8 +155,6 @@ class BetterPlayerDataSource {
   ///Bytes parameter is not used in this data source.
   factory BetterPlayerDataSource.file(String url, {
     String? adsUrl,
-    bool? isDvr,
-    int? dvrSeekPosition,
     List<BetterPlayerSubtitlesSource>? subtitles,
     bool? useAsmsSubtitles,
     bool? useAsmsTracks,
@@ -179,8 +168,6 @@ class BetterPlayerDataSource {
         BetterPlayerDataSourceType.file,
         url,
         adsUrl: adsUrl,
-        isDvr:isDvr,
-        dvrSeekPosition:dvrSeekPosition,
         subtitles: subtitles,
         useAsmsSubtitles: useAsmsSubtitles,
         useAsmsTracks: useAsmsTracks,
@@ -227,8 +214,6 @@ class BetterPlayerDataSource {
     BetterPlayerDataSourceType? type,
     String? url,
     String? adsUrl,
-    bool? isDvr,
-    int? dvrSeekPosition,
     List<int>? bytes,
     List<BetterPlayerSubtitlesSource>? subtitles,
     bool? liveStream,
@@ -252,8 +237,6 @@ class BetterPlayerDataSource {
       type ?? this.type,
       url ?? this.url,
       adsUrl: adsUrl ?? this.adsUrl,
-      isDvr: isDvr,
-      dvrSeekPosition: dvrSeekPosition,
       bytes: bytes ?? this.bytes,
       subtitles: subtitles ?? this.subtitles,
       liveStream: liveStream ?? this.liveStream,

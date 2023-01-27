@@ -241,8 +241,6 @@ class DataSource {
     required this.sourceType,
     this.uri,
     this.adsUri,
-    this.isDvr,
-    this.dvrSeekPosition,
     this.formatHint,
     this.asset,
     this.package,
@@ -280,8 +278,6 @@ class DataSource {
   /// the original video.
   final String? uri;
   final String? adsUri;
-  final bool? isDvr;
-  final int? dvrSeekPosition;
 
   /// **Android only**. Will override the platform's generic file format
   /// detection with whatever is set here.

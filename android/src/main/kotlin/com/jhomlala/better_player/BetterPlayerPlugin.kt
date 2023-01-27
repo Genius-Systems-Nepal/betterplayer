@@ -303,8 +303,6 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 key,
                 uri,
                 adsUri,
-                isDVR,
-                dvrSeekPosition,
                 null,
                 result,
                 headers,
@@ -534,8 +532,6 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val ASSET_PARAMETER = "asset"
         private const val PACKAGE_PARAMETER = "package"
         private const val URI_PARAMETER = "uri"
-        private const val IS_DVR = "isDvr"
-        private const val DVR_SEEK_POSITION = "dvrSeekPositiion"
         private const val ADS_URI_PARAMETER = "ads_url"
         private const val FORMAT_HINT_PARAMETER = "formatHint"
         private const val TEXTURE_ID_PARAMETER = "textureId"

@@ -108,8 +108,6 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'key': dataSource.key,
           'uri': dataSource.uri,
           'ads_url': dataSource.adsUri,
-          'isDvr': dataSource.isDvr,
-          'dvrSeekPositiion': dataSource.dvrSeekPosition,
           'formatHint': dataSource.rawFormalHint,
           'headers': dataSource.headers,
           'useCache': dataSource.useCache,
