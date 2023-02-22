@@ -652,7 +652,8 @@ class BetterPlayerController {
     if (videoPlayerController?.value.duration == null) {
       throw StateError("The video has not been initialized yet.");
     }
-    final Duration? currentDuration = await videoPlayerController!.contentDuration();
+
+    final Duration? currentDuration = Platform.isAndroid ? await videoPlayerController!.contentDuration() : await videoPlayerController!.value.duration;
 
     await videoPlayerController!.seekTo(moment, currentDuration: currentDuration);
 
