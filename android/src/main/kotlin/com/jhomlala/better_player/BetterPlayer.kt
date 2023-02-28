@@ -21,6 +21,7 @@ import android.view.Surface
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.lifecycle.Observer
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequest
@@ -33,19 +34,13 @@ import com.google.android.exoplayer2.drm.*
 import com.google.android.exoplayer2.ext.ima.ImaAdsLoader
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 import com.google.android.exoplayer2.ext.rtmp.RtmpDataSource
-import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory
 import com.google.android.exoplayer2.source.*
-import com.google.android.exoplayer2.source.dash.DashMediaSource
-import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource
-import com.google.android.exoplayer2.source.hls.HlsMediaSource
-import com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource
-import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
 import com.google.android.exoplayer2.trackselection.TrackSelectionOverrides
+import com.google.android.exoplayer2.ui.DefaultTrackNameProvider
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
 import com.google.android.exoplayer2.ui.PlayerNotificationManager.BitmapCallback
 import com.google.android.exoplayer2.ui.PlayerNotificationManager.MediaDescriptionAdapter
-import com.google.android.exoplayer2.ui.DefaultTrackNameProvider
 import com.google.android.exoplayer2.upstream.DataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
@@ -54,6 +49,12 @@ import com.google.android.exoplayer2.util.Util
 import com.jhomlala.better_player.DataSourceUtils.getDataSourceFactory
 import com.jhomlala.better_player.DataSourceUtils.getUserAgent
 import com.jhomlala.better_player.DataSourceUtils.isHTTP
+import com.pallycon.widevine.exception.PallyConException
+import com.pallycon.widevine.exception.PallyConLicenseServerException
+import com.pallycon.widevine.model.ContentData
+import com.pallycon.widevine.model.PallyConDrmConfigration
+import com.pallycon.widevine.model.PallyConEventListener
+import com.pallycon.widevine.sdk.PallyConWvSDK
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.EventChannel.EventSink
 import io.flutter.plugin.common.MethodChannel
@@ -84,7 +85,7 @@ internal class BetterPlayer(
     private var exoPlayerEventListener: Player.Listener? = null
     private var bitmap: Bitmap? = null
     private var mediaSession: MediaSessionCompat? = null
-    private var drmSessionManager: DrmSessionManager? = null
+//    private var drmSessionManager: DrmSessionManager? = null
     private val workManager: WorkManager
     private val workerObserverMap: HashMap<UUID, Observer<WorkInfo?>>
     private val customDefaultLoadControl: CustomDefaultLoadControl =
@@ -98,6 +99,45 @@ internal class BetterPlayer(
     private val activity = act
     private val adsLayout = FrameLayout(act)
     private var isAdPlay = false
+
+    /// DRM
+    var wvmAgent: PallyConWvSDK? = null
+    var drmToken: String? = null
+    private val drmListener: PallyConEventListener = object : PallyConEventListener {
+        override fun onFailed(currentUrl: String?, e: PallyConException?) {
+            Toast.makeText(context, e!!.msg, Toast.LENGTH_LONG).show()
+        }
+
+        override fun onFailed(currentUrl: String?, e: PallyConLicenseServerException?) {
+            val message = String.format("%d, %s", e!!.errorCode(), e.body())
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        }
+
+        override fun onPaused(currentUrl: String?) {}
+        override fun onRemoved(currentUrl: String?) {}
+        override fun onRestarting(currentUrl: String?) {}
+        override fun onStopped(currentUrl: String?) {}
+        override fun onProgress(currentUrl: String?, percent: Float, downloadedBytes: Long) {}
+        override fun onCompleted(currentUrl: String?) {}
+    }
+
+    // TODO : must implement ExoPlayer.EventListener
+    var playerEventListener: Player.Listener = object : Player.Listener {
+        override fun onPlayerError(error: PlaybackException) {
+            val errorString: String
+            errorString = if (error.errorCode == ExoPlaybackException.TYPE_RENDERER) {
+                error.localizedMessage
+            } else if (error.errorCode == ExoPlaybackException.TYPE_SOURCE) {
+                error.localizedMessage
+            } else if (error.errorCode == ExoPlaybackException.TYPE_UNEXPECTED) {
+                error.localizedMessage
+            } else {
+                error.localizedMessage
+            }
+            Toast.makeText(context, String.format("%d %s", error.errorCode, errorString), Toast.LENGTH_LONG).show()
+        }
+    }
+
     init {
         val loadBuilder = DefaultLoadControl.Builder()
         loadBuilder.setBufferDurationsMs(
@@ -146,8 +186,6 @@ internal class BetterPlayer(
             }
         exoPlayer = ExoPlayer.Builder(context)
             .setTrackSelector(trackSelector)
-            .setLoadControl(loadControl)
-            .setMediaSourceFactory(mediaSourceFactory)
             .build()
         adsLoader.setPlayer(exoPlayer)
         workManager = WorkManager.getInstance(context)
@@ -183,7 +221,7 @@ internal class BetterPlayer(
         return exoPlayer!!.contentPosition
     }
 
-    fun setDataSource(
+    /*fun setDataSource(
         context: Context,
         key: String?,
         dataSource: String?,
@@ -214,7 +252,8 @@ internal class BetterPlayer(
                 HttpMediaDrmCallback(licenseUrl, DefaultHttpDataSource.Factory())
             if (drmHeaders != null) {
                 for ((drmKey, drmValue) in drmHeaders) {
-                    httpMediaDrmCallback.setKeyRequestProperty(drmKey, drmValue)
+//                    httpMediaDrmCallback.setKeyRequestProperty(drmKey, drmValue)
+                    drmToken = drmValue;
                 }
             }
             if (Util.SDK_INT < 18) {
@@ -269,7 +308,7 @@ internal class BetterPlayer(
         } else {
             dataSourceFactory = DefaultDataSource.Factory(context)
         }
-        buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
+        buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context, drmToken)
 //        val mediaSource = buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
 //        if (overriddenDuration != 0L) {
 //            val clippingMediaSource = ClippingMediaSource(mediaSource, 0, overriddenDuration * 1000)
@@ -279,6 +318,39 @@ internal class BetterPlayer(
 //        }
         exoPlayer?.prepare()
         exoPlayer?.playWhenReady = true
+        result.success(null)
+    }*/
+
+    fun setDataSource(
+        context: Context,
+        key: String?,
+        dataSource: String?,
+        adsLink: String?,
+        formatHint: String?,
+        result: MethodChannel.Result,
+        headers: Map<String, String>?,
+        useCache: Boolean,
+        maxCacheSize: Long,
+        maxCacheFileSize: Long,
+        overriddenDuration: Long,
+        licenseUrl: String?,
+        drmHeaders: Map<String, String>?,
+        cacheKey: String?,
+        clearKey: String?
+    ) {
+        this.key = key
+        isInitialized = false
+        val uri = Uri.parse(dataSource)
+        if (licenseUrl != null && licenseUrl.isNotEmpty()) {
+            if (drmHeaders != null) {
+                for ((drmKey, drmValue) in drmHeaders) {
+                    drmToken = drmValue;
+                }
+            }
+        }
+
+//        buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context, drmToken)
+        buildMediaSource(uri, context, drmToken)
         result.success(null)
     }
 
@@ -456,7 +528,7 @@ internal class BetterPlayer(
         bitmap = null
     }
 
-    private fun buildMediaSource(
+/*    private fun buildMediaSource(
         uri: Uri,
         adsUri: Uri?,
         mediaDataSourceFactory: DataSource.Factory,
@@ -526,6 +598,46 @@ internal class BetterPlayer(
         exoPlayer?.setMediaSource(mediaSource)
         exoPlayer?.setMediaItem(mediaItem)
         exoPlayer?.playWhenReady = true
+    }*/
+
+    private fun buildMediaSource(
+        uri: Uri,
+        context: Context,
+        drmToken: String?
+    ) {
+
+        Log.d("DRMTOKEN", drmToken.toString())
+        Log.d("DRMTOKEN", uri.toString())
+
+        // TODO : 1.set content information
+//        val config = PallyConDrmConfigration(
+//            "ZJM5",
+//            drmToken
+//        )
+//        val content = ContentData(
+//            uri.toString(),
+//            "",
+//            config
+//        )
+
+//        // TODO : 1.set content information
+        val config = PallyConDrmConfigration(
+            "DEMO",
+            "eyJrZXlfcm90YXRpb24iOmZhbHNlLCJyZXNwb25zZV9mb3JtYXQiOiJvcmlnaW5hbCIsInVzZXJfaWQiOiJ0ZXN0VXNlciIsImRybV90eXBlIjoid2lkZXZpbmUiLCJzaXRlX2lkIjoiREVNTyIsImhhc2giOiJpSGlpQmM3U1QrWTR1T0h1VnVPQVNmNU1nTDVibDJMb1FuNzNHREtcLzltbz0iLCJjaWQiOiJtdWx0aXRyYWNrcyIsInBvbGljeSI6IjlXcUlXa2RocHhWR0s4UFNJWWNuSnNjdnVBOXN4Z3ViTHNkK2FqdVwvYm9tUVpQYnFJK3hhZVlmUW9jY2t2dUVmQWFxZFc1aFhnSk5nY1NTM2ZTN284TnNqd3N6ak11dnQrMFF6TGtaVlZObXgwa2VmT2Uyd0NzMlRJVGdkVTRCdk45YWJoZDByUWtNSXJtb0llb0pIcUllSGNSdlZmNlQxNFJtVEFERXBDWTQ2NHdxamNzWjA0Uk82Zm90Nm5yZjhXSGZ3QVNjek9kV1d6QStFRlRadDhRTWw5SFRueWVYK1g3YXp1Y2VmQjJBd2V0XC9hQm0rZXpmUERodFZuaUhsSiIsInRpbWVzdGFtcCI6IjIwMjItMDgtMDVUMDY6MDM6MjJaIn0="
+        )
+        val content = ContentData(
+            "https://contents.pallycon.com/DEV/sglee/multitracks/dash/stream.mpd",
+            "",
+            config
+        )
+        // initialize PallyconWVM SDK
+        wvmAgent = PallyConWvSDK.createPallyConWvSDK(context, content, drmListener)
+        val pallyConMediaSource: MediaSource = wvmAgent!!.getMediaSource()
+
+        exoPlayer?.setMediaSource(pallyConMediaSource)
+        exoPlayer?.addListener(playerEventListener)
+        exoPlayer?.playWhenReady = true
+        exoPlayer?.prepare()
     }
 
     private fun setupVideoPlayer(
@@ -932,5 +1044,4 @@ internal class BetterPlayer(
             result.success(null)
         }
     }
-
 }

@@ -1,1 +1,3 @@
 rootProject.name = 'better_player'
+include ':libs'
+

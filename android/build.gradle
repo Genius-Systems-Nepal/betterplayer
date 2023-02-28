@@ -25,11 +25,15 @@ rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
+        flatDir {
+            dirs("D:\\Himshikha\\projects\\flutter\\better_player\\betterplayer\\android\\libs")
+        }
     }
 }
 
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
+apply plugin: 'kotlin-parcelize'
 
 android {
     compileSdkVersion 31
@@ -52,6 +56,8 @@ android {
     }
 
     dependencies {
+        api(name:'PallyconWVMSDK', ext:'aar')
+
         implementation "com.google.android.exoplayer:exoplayer-core:$exoPlayerVersion"
         implementation "com.google.android.exoplayer:exoplayer-hls:$exoPlayerVersion"
         implementation "com.google.android.exoplayer:exoplayer-dash:$exoPlayerVersion"
@@ -65,6 +71,10 @@ android {
         implementation "androidx.work:work-runtime:$workVersion"
         implementation "com.google.android.exoplayer:extension-ima:$exoPlayerVersion"
         implementation "com.google.android.exoplayer:extension-rtmp:$exoPlayerVersion"
+        implementation "com.google.android.exoplayer:extension-okhttp:$exoPlayerVersion"
+
+        // Secure
+        implementation "androidx.security:security-crypto-ktx:1.1.0-alpha03"
     }
 }
 
