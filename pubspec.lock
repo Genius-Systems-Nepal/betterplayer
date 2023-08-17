@@ -56,7 +56,7 @@ packages:
       sha256: "1989d917fbe8e6b39806207df5a3fdd3d816cbd090fac2ce26fb45e9a71476e5"
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.4"
+    version: "1.0.5"
   fake_async:
     dependency: transitive
     description:
@@ -148,7 +148,7 @@ packages:
       sha256: "29e4570fcef31050c9ca1873f27dd881f462717a1d786d0767ccc19296efd51f"
       url: "https://pub.dev"
     source: hosted
-    version: "1.7.2"
+    version: "1.8.2"
   matcher:
     dependency: transitive
     description:
@@ -188,7 +188,7 @@ packages:
       sha256: e92dee4d38a9044605cb3fb253e9b46eb9375dfcad4515d0379b44ac90797568
       url: "https://pub.dev"
     source: hosted
-    version: "2.0.9"
+    version: "2.0.10"
   path_provider_android:
     dependency: transitive
     description:
@@ -252,7 +252,7 @@ packages:
       sha256: "49392a45ced973e8d94a85fdb21293fbb40ba805fc49f2965101ae748a3683b4"
       url: "https://pub.dev"
     source: hosted
-    version: "5.1.0"
+    version: "5.0.0"
   platform:
     dependency: transitive
     description:
@@ -289,7 +289,7 @@ packages:
       sha256: dd904f795d4b4f3b870833847c461801f6750a9fa8e61ea5ac53f9422b31f250
       url: "https://pub.dev"
     source: hosted
-    version: "1.9.1"
+    version: "1.8.2"
   stack_trace:
     dependency: transitive
     description:
@@ -329,7 +329,7 @@ packages:
       sha256: eb6ac1540b26de412b3403a163d919ba86f6a973fe6cc50ae3541b80092fdcfb
       url: "https://pub.dev"
     source: hosted
-    version: "0.5.1"
+    version: "0.4.9"
   vector_math:
     dependency: transitive
     description:
@@ -337,7 +337,7 @@ packages:
       sha256: "80b3257d1492ce4d091729e3a67a60407d227c27241d6927be0130c98e741803"
       url: "https://pub.dev"
     source: hosted
-    version: "2.1.4"
+    version: "2.1.2"
   visibility_detector:
     dependency: "direct main"
     description:
