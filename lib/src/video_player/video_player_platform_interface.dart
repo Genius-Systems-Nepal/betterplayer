@@ -155,6 +155,15 @@ abstract class VideoPlayerPlatform {
         'isPictureInPictureEnabled() has not been implemented.');
   }
 
+  Future<bool?> checkPipPermission(int? textureId) {
+    throw UnimplementedError('checkPipPermission() has not been implemented.');
+  }
+
+  Future<void> openPipPermissionSettings(int? textureId) {
+    throw UnimplementedError(
+        'openPipPermissionSettings() has not been implemented.');
+  }
+
   ///Remove ad views
   Future<void> disposeAdView(int? textureId) {
     throw UnimplementedError('disposeAdView() has not been implemented.');
