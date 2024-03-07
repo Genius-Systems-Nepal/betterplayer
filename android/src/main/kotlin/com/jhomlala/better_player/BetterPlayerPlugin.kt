@@ -4,12 +4,16 @@
 package com.jhomlala.better_player
 
 import android.app.Activity
+import android.app.AppOpsManager
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import android.util.LongSparseArray
 import com.jhomlala.better_player.BetterPlayerCache.releaseCache
@@ -215,6 +219,12 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             }
             IS_PICTURE_IN_PICTURE_SUPPORTED_METHOD -> result.success(
                 isPictureInPictureSupported()
+            )
+            CHECK_PICTURE_IN_PICTURE_PERMISSION_METHOD -> result.success(
+                hasPipPermission(flutterState!!.applicationContext)
+            )
+            OPEN_PICTURE_IN_PICTURE_PERMISSION_SETTINGS_METHOD -> result.success(
+                openPipPermissionSettings()
             )
             SET_AUDIO_TRACK_METHOD -> {
                 val name = call.argument<String?>(NAME_PARAMETER)
@@ -443,6 +453,40 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             .hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
     }
 
+    private fun openPipPermissionSettings() {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+        val uri = Uri.fromParts(
+            "package",
+            flutterState?.applicationContext!!.packageName,
+            null
+        )
+        intent.data = uri
+        activity?.startActivity(intent)
+    }
+
+    private fun hasPipPermission(context: Context): Boolean {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager?
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                appOps?.unsafeCheckOpNoThrow(
+                    AppOpsManager.OPSTR_PICTURE_IN_PICTURE,
+                    android.os.Process.myUid(),
+                    context.packageName
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                appOps?.checkOpNoThrow(
+                    AppOpsManager.OPSTR_PICTURE_IN_PICTURE,
+                    android.os.Process.myUid(),
+                    context.packageName
+                )
+            }
+            mode == AppOpsManager.MODE_ALLOWED
+        } else {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+        }
+    }
+
     private fun enablePictureInPicture(player: BetterPlayer) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             player.setupMediaSession(flutterState!!.applicationContext)
@@ -578,6 +622,8 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val ENABLE_PICTURE_IN_PICTURE_METHOD = "enablePictureInPicture"
         private const val DISABLE_PICTURE_IN_PICTURE_METHOD = "disablePictureInPicture"
         private const val IS_PICTURE_IN_PICTURE_SUPPORTED_METHOD = "isPictureInPictureSupported"
+        private const val CHECK_PICTURE_IN_PICTURE_PERMISSION_METHOD = "checkPictureInPicturePermission"
+        private const val OPEN_PICTURE_IN_PICTURE_PERMISSION_SETTINGS_METHOD = "openPictureInPicturePermissionSettings"
         private const val SET_MIX_WITH_OTHERS_METHOD = "setMixWithOthers"
         private const val CLEAR_CACHE_METHOD = "clearCache"
         private const val DISPOSE_METHOD = "dispose"
