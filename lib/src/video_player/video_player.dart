@@ -645,6 +645,17 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     return _videoPlayerPlatform.isPictureInPictureEnabled(_textureId);
   }
 
+  Future<bool?> checkPipPermission() async {
+    if (_textureId == null) {
+      return false;
+    }
+    return _videoPlayerPlatform.checkPipPermission(_textureId);
+  }
+
+  Future<void> openPipPermissionSettings() async {
+    await _videoPlayerPlatform.openPipPermissionSettings(_textureId);
+  }
+
   void refresh() {
     value = value.copyWith();
   }
