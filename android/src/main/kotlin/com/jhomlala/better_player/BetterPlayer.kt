@@ -34,7 +34,9 @@ import com.google.android.exoplayer2.ext.ima.ImaAdsLoader
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector
 import com.google.android.exoplayer2.ext.rtmp.RtmpDataSource
 import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory
+import com.google.android.exoplayer2.mediacodec.MediaCodecSelector
 import com.google.android.exoplayer2.source.*
+import com.google.android.exoplayer2.source.dash.DashChunkSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
 import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
@@ -58,7 +60,15 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.EventChannel.EventSink
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry.SurfaceTextureEntry
+import org.json.JSONArray
+import org.json.JSONException
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.util.*
 import kotlin.math.max
 import kotlin.math.min
@@ -144,7 +154,14 @@ internal class BetterPlayer(
                 adsLayout.bringToFront()
                 adsLayout
             }
-        exoPlayer = ExoPlayer.Builder(context)
+
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+            .setMediaCodecSelector { mimeType, _, requiresTunnelingDecoder ->
+                MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, false, requiresTunnelingDecoder)
+            }
+
+        exoPlayer = ExoPlayer.Builder(context, renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -209,6 +226,9 @@ internal class BetterPlayer(
         }
         var dataSourceFactory: DataSource.Factory?
         val userAgent = getUserAgent(headers)
+
+        val drmToken: String? = drmHeaders?.get("drm_token")
+
         if (licenseUrl != null && licenseUrl.isNotEmpty()) {
             val httpMediaDrmCallback =
                 HttpMediaDrmCallback(licenseUrl, DefaultHttpDataSource.Factory())
@@ -269,17 +289,184 @@ internal class BetterPlayer(
         } else {
             dataSourceFactory = DefaultDataSource.Factory(context)
         }
-        buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
-//        val mediaSource = buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
-//        if (overriddenDuration != 0L) {
-//            val clippingMediaSource = ClippingMediaSource(mediaSource, 0, overriddenDuration * 1000)
-//            exoPlayer?.setMediaSource(clippingMediaSource)
-//        } else {
-//            exoPlayer?.setMediaSource(mediaSource)
-//        }
+
+        if (!licenseUrl.isNullOrEmpty() && !drmToken.isNullOrEmpty()) {
+            val drmMediaSource = buildDrmMediaSource(uri, context, drmToken, licenseUrl)
+            exoPlayer?.setMediaSource(drmMediaSource)
+        } else {
+            buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
+//            val mediaSource = buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
+//            if (overriddenDuration != 0L) {
+//                val clippingMediaSource = ClippingMediaSource(mediaSource, 0, overriddenDuration * 1000)
+//                exoPlayer?.setMediaSource(clippingMediaSource)
+//            } else {
+//                exoPlayer?.setMediaSource(mediaSource)
+//            }
+        }
+
         exoPlayer?.prepare()
         exoPlayer?.playWhenReady = true
         result.success(null)
+    }
+
+    private fun buildDrmMediaSource(
+        uri: Uri,
+        context: Context,
+        drmToken: String,
+        licenseUrl: String
+    ): MediaSource {
+        val defaultDrmSessionManager =
+            DefaultDrmSessionManager.Builder().build(object : MediaDrmCallback {
+                @Throws(MediaDrmCallbackException::class)
+                override fun executeProvisionRequest(
+                    uuid: UUID,
+                    request: ExoMediaDrm.ProvisionRequest
+                ): ByteArray {
+                    try {
+                        val url = request.defaultUrl + "&signedRequest=" + String(request.data)
+                        return executePost(url)
+                    } catch (e: IOException) {
+                        e.printStackTrace()
+                    }
+
+                    return ByteArray(0)
+                }
+
+                @Throws(MediaDrmCallbackException::class)
+                override fun executeKeyRequest(
+                    uuid: UUID,
+                    request: ExoMediaDrm.KeyRequest
+                ): ByteArray {
+                    val postParameters: MutableMap<String, String> = HashMap()
+                    postParameters["kid"] = ""
+                    postParameters["token"] = drmToken
+                    try {
+                        return executePost(request.data, postParameters, licenseUrl)
+                    } catch (e: IOException) {
+                        e.printStackTrace()
+                    }
+
+                    return ByteArray(0)
+                }
+            })
+
+        defaultDrmSessionManager.setMode(
+            DefaultDrmSessionManager.MODE_PLAYBACK,
+            null
+        )
+
+        val drmSessionManagerProvider = DrmSessionManagerProvider {
+            defaultDrmSessionManager
+        }
+
+        return buildDashMediaSource(drmSessionManagerProvider, context, uri)
+    }
+
+    private fun buildDashMediaSource(drmSessionManager: DrmSessionManagerProvider, context: Context, uri: Uri): DashMediaSource {
+        val dashChunkSourceFactory: DashChunkSource.Factory =
+            DefaultDashChunkSource.Factory(DefaultHttpDataSource.Factory())
+        val manifestDataSourceFactory: DefaultHttpDataSource.Factory =
+            DefaultHttpDataSource.Factory()
+        return DashMediaSource.Factory(dashChunkSourceFactory, manifestDataSourceFactory)
+            .setDrmSessionManagerProvider(drmSessionManager)
+            .createMediaSource(
+                MediaItem.Builder()
+                    .setUri(uri).build()
+            )
+    }
+
+    @Throws(IOException::class)
+    private fun executePost(bytearray: ByteArray, requestProperties: Map<String, String>, licenseUrl: String): ByteArray {
+        var data: ByteArray? = bytearray
+        var urlConnection: HttpURLConnection? = null
+        try {
+            urlConnection =
+                URL(licenseUrl).openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "POST"
+            urlConnection.doOutput = true
+            urlConnection.doInput = true
+            urlConnection.setRequestProperty("Content-Type", "application/json")
+            urlConnection.connectTimeout = 30000
+            urlConnection.readTimeout = 30000
+
+            val json = JSONObject()
+            try {
+                val jsonArray = JSONArray()
+                val bitmask = 0x000000FF
+                for (aData in data!!) {
+                    val `val` = aData.toInt()
+                    jsonArray.put(bitmask and `val`)
+                }
+
+                json.put("token", requestProperties["token"])
+                json.put("drm_info", jsonArray)
+                json.put("kid", requestProperties["kid"])
+            } catch (e: JSONException) {
+                e.printStackTrace()
+            }
+
+            data = json.toString().toByteArray(StandardCharsets.UTF_8)
+
+            val out = urlConnection.outputStream
+            out.use {
+                it.write(data)
+            }
+
+            val responseCode = urlConnection.responseCode
+            if (responseCode < 400) {
+                // Read and return the response body.
+                val inputStream = urlConnection.inputStream
+                inputStream.use { input ->
+                    val byteArrayOutputStream = ByteArrayOutputStream()
+                    val scratch = ByteArray(1024)
+                    var bytesRead: Int
+                    while ((input.read(scratch).also { bytesRead = it }) != -1) {
+                        byteArrayOutputStream.write(scratch, 0, bytesRead)
+                    }
+                    return byteArrayOutputStream.toByteArray()
+                }
+            } else {
+                throw IOException()
+            }
+        } finally {
+            urlConnection?.disconnect()
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun executePost(
+        url: String?
+    ): ByteArray {
+        val data: ByteArray? = null
+        val requestProperties: Map<String?, String?>? = null
+        var urlConnection: HttpURLConnection? = null
+        try {
+            urlConnection = URL(url).openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "POST"
+            urlConnection.doOutput = data != null
+            urlConnection.doInput = true
+            if (requestProperties != null) {
+                for ((key1, value) in requestProperties) {
+                    urlConnection.setRequestProperty(key1, value)
+                }
+            }
+            // Write the request body, if there is one.
+            if (data != null) {
+                val out = urlConnection.outputStream
+                out.use {
+                    it.write(data)
+                }
+            }
+            // Read and return the response body.
+            val inputStream = urlConnection.inputStream
+            try {
+                return Util.toByteArray(inputStream)
+            } finally {
+                Util.closeQuietly(inputStream)
+            }
+        } finally {
+            urlConnection?.disconnect()
+        }
     }
 
     private fun buildRtmp(): DataSource.Factory{
