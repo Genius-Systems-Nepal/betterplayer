@@ -71,6 +71,7 @@ class MockVideoPlayerController extends VideoPlayerController {
     String? licenseUrl,
     String? certificateUrl,
     Map<String, String>? drmHeaders,
+    Map<String, String>? extraParams,
     String? activityName,
     String? clearKey,
     String? videoExtension,

@@ -257,7 +257,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         AVURLAsset* asset = [AVURLAsset URLAssetWithURL:url
                                                 options:@{@"AVURLAssetHTTPHeaderFieldsKey" : headers}];
         //if drmToken is passed, it is vu drm, else fallback to ez drm
-        if ([drmToken length] > 0) {
+        if ((drmToken != (id)[NSNull null]) && ([drmToken length] > 0) && (certificateUrl != (id)[NSNull null])) {
             NSURL * licenseNSURL = [[NSURL alloc] initWithString: licenseUrl];
             _vuDrmAssetsloaderDelegate = [[BetterPlayerVuDrmAssetsLoaderDelegate alloc]initWithCertificateURL:certificateUrl licenseURL:licenseNSURL fairPlayToken:drmToken];
             dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_DEFAULT, -1);

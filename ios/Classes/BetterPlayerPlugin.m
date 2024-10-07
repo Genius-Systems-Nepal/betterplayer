@@ -318,10 +318,10 @@ bool _remoteCommandsInitialized = false;
             NSString* adsUrl = dataSource[@"ads_url"];
             
             NSString *drmToken;
-            if ([dataSource objectForKey:@"drmHeaders"] != [NSNull null]) {
-                NSDictionary *drmHeaders = dataSource[@"drmHeaders"];
-                if ([drmHeaders objectForKey:@"drm_token"] != [NSNull null]) {
-                    drmToken = drmHeaders[@"drm_token"];
+            if ([dataSource objectForKey:@"extraParams"] != [NSNull null]) {
+                NSDictionary *extraParams = dataSource[@"extraParams"];
+                if ([extraParams objectForKey:@"drm_token"] != [NSNull null]) {
+                    drmToken = extraParams[@"drm_token"];
                 }
             }
             
