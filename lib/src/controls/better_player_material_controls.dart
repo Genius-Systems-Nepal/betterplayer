@@ -736,9 +736,27 @@ class _BetterPlayerMaterialControlsState
       );
     }
 
-    return CircularProgressIndicator(
-      valueColor:
-          AlwaysStoppedAnimation<Color>(_controlsConfiguration.loadingColor),
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned(
+            top: 8,
+            left: 12,
+            child: InkWell(
+              onTap: () => Navigator.pop(context),
+              child: Icon(
+                Icons.arrow_back,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_controlsConfiguration.loadingColor),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
