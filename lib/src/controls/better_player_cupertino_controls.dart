@@ -758,7 +758,7 @@ class _BetterPlayerCupertinoControlsState
           Positioned(
             top: 8,
             left: 12,
-            child: InkWell(
+            child: GestureDetector(
               onTap: () => Navigator.pop(context),
               child: Icon(
                 Icons.arrow_back,

@@ -680,25 +680,23 @@ class _BetterPlayerMaterialControlsState extends BetterPlayerControlsState<Bette
       );
     }
 
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: Stack(
+    return Scaffold(
+      body: Stack(
         children: [
-          Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(_controlsConfiguration.loadingColor),
-            ),
-          ),
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              color: Colors.transparent,
-              height: 40,
-              width: 51,
+          Positioned(
+            top: 8,
+            left: 12,
+            child: GestureDetector(
+              onTap: () => Navigator.pop(context),
               child: Icon(
                 Icons.arrow_back,
                 color: Colors.white,
               ),
+            ),
+          ),
+          Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_controlsConfiguration.loadingColor),
             ),
           ),
         ],
