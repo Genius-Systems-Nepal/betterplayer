@@ -21,9 +21,13 @@ import Alamofire
         let url = self.certificateURL ?? ""
         let headers: HTTPHeaders? = ["x-vudrm-token" : self.fairPlayToken ?? ""]
         request(url, method: .get, headers: headers).validate().responseData { [weak self] response in
-            guard let self = self else { return }
+            guard let self = self else {
+                loadingRequest.finishLoading()
+                return
+            }
             if let error = response.error {
                 print("❌ Error on fetching certificate! -> \(error.localizedDescription)")
+                loadingRequest.finishLoading()
                 return
             }
             let certificateData = response.value
