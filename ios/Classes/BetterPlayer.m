@@ -23,6 +23,7 @@ AVPictureInPictureController *_pipController;
     NSTimer *nerdStatTimer;
     BetterPlayerVuDrmAssetsLoaderDelegate *_vuDrmAssetsloaderDelegate;
     BOOL nerdStatActive;
+    double lastBitRate;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -101,7 +102,23 @@ AVPictureInPictureController *_pipController;
                                                  selector:@selector(itemDidPlayToEndTime:)
                                                      name:AVPlayerItemDidPlayToEndTimeNotification
                                                    object:item];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(handleAVPlayerAccess:)
+                                                     name:AVPlayerItemNewAccessLogEntryNotification
+                                                   object:nil];
         self._observersAdded = true;
+    }
+}
+
+- (void)handleAVPlayerAccess:(NSNotification *)notif {
+    AVPlayerItemAccessLog *accessLog = [((AVPlayerItem *)notif.object) accessLog];
+    AVPlayerItemAccessLogEvent *lastEvent = accessLog.events.lastObject;
+    float lastEventNumber = lastEvent.indicatedBitrate;
+    if (lastEventNumber != lastBitRate) {
+        lastBitRate = lastEventNumber;
+        if (_eventSink != nil) {
+            _eventSink(@{@"event" : @"bitrateUpdate", @"values" : [NSNumber numberWithInt:(int)lastBitRate]});
+        }
     }
 }
 
