@@ -257,6 +257,7 @@ class DataSource {
     this.licenseUrl,
     this.certificateUrl,
     this.drmHeaders,
+    this.extraParams,
     this.activityName,
     this.clearKey,
     this.videoExtension,
@@ -333,6 +334,8 @@ class DataSource {
   final String? certificateUrl;
 
   final Map<String, String>? drmHeaders;
+
+  final Map<String, String>? extraParams;
 
   final String? activityName;
 
@@ -415,6 +418,7 @@ class VideoEvent {
     this.buffered,
     this.position,
     this.nerdStat,
+    this.bitrateUpdate = 0
   });
 
   /// The type of the event.
@@ -445,6 +449,9 @@ class VideoEvent {
 
   ///Nerdstat
   final dynamic nerdStat;
+
+  ///bitrate
+  final int bitrateUpdate;
 
   @override
   bool operator ==(Object other) {
@@ -509,6 +516,7 @@ enum VideoEventType {
 
   adStarted,
   adEnded,
+  bitrateUpdate
 }
 
 /// Describes a discrete segment of time within a video using a [start] and

@@ -303,7 +303,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 0L,
                 overriddenDuration.toLong(),
                 null,
-                null, null, null
+                null, null, null, null
             )
         } else {
             val useCache = getParameter(dataSource, USE_CACHE_PARAMETER, false)
@@ -320,6 +320,8 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             val clearKey = getParameter<String?>(dataSource, DRM_CLEARKEY_PARAMETER, null)
             val drmHeaders: Map<String, String> =
                 getParameter(dataSource, DRM_HEADERS_PARAMETER, HashMap())
+            val extraParams: Map<String, String> =
+                getParameter(dataSource, EXTRA_PARAMS_PARAMETER, HashMap())
             player.setDataSource(
                 flutterState!!.applicationContext,
                 key,
@@ -334,6 +336,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 overriddenDuration.toLong(),
                 licenseUrl,
                 drmHeaders,
+                extraParams,
                 cacheKey,
                 clearKey
             )
@@ -592,6 +595,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val INDEX_PARAMETER = "index"
         private const val LICENSE_URL_PARAMETER = "licenseUrl"
         private const val DRM_HEADERS_PARAMETER = "drmHeaders"
+        private const val EXTRA_PARAMS_PARAMETER = "extraParams"
         private const val DRM_CLEARKEY_PARAMETER = "clearKey"
         private const val MIX_WITH_OTHERS_PARAMETER = "mixWithOthers"
         const val URL_PARAMETER = "url"
