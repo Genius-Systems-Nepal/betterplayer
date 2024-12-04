@@ -105,6 +105,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'licenseUrl': dataSource.licenseUrl,
           'certificateUrl': dataSource.certificateUrl,
           'drmHeaders': dataSource.drmHeaders,
+          'extraParams': dataSource.extraParams,
           'activityName': dataSource.activityName,
           'clearKey': dataSource.clearKey,
           'videoExtension': dataSource.videoExtension,
@@ -482,6 +483,13 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
               eventType: VideoEventType.nerdStat,
               key: key,
               nerdStat: values);
+
+        case 'bitrateUpdate':
+          dynamic values = map["values"];
+          return VideoEvent(
+              eventType: VideoEventType.bitrateUpdate,
+              key: key,
+              bitrateUpdate: values);
 
         case 'adStarted':
           return VideoEvent(eventType: VideoEventType.adStarted, key: key);
