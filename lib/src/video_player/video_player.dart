@@ -33,7 +33,8 @@ class VideoPlayerValue {
     this.speed = 1.0,
     this.errorDescription,
     this.isPip = false,
-    this.nerdStatValue = ""
+    this.nerdStatValue = "",
+    this.bitrateValue = 0,
   });
 
   /// Returns an instance with a `null` [Duration].
@@ -98,6 +99,9 @@ class VideoPlayerValue {
   /// Nerd stats
   final String nerdStatValue;
 
+  /// Bitrate
+  final int bitrateValue;
+
   /// Returns [size.width] / [size.height] when size is non-null, or `1.0.` when
   /// size is null or the aspect ratio would be less than or equal to 0.0.
   double get aspectRatio {
@@ -127,6 +131,7 @@ class VideoPlayerValue {
     double? speed,
     bool? isPip,
     String? nerdStatValue,
+    int? bitrateValue
   }) {
     return VideoPlayerValue(
       duration: duration ?? this.duration,
@@ -141,7 +146,8 @@ class VideoPlayerValue {
       speed: speed ?? this.speed,
       errorDescription: errorDescription ?? this.errorDescription,
       isPip: isPip ?? this.isPip,
-        nerdStatValue: nerdStatValue ?? this.nerdStatValue
+      nerdStatValue: nerdStatValue ?? this.nerdStatValue,
+      bitrateValue: bitrateValue ?? this.bitrateValue
     );
   }
 
@@ -261,6 +267,9 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
         case VideoEventType.nerdStat:
           value = value.copyWith(isPip: false, nerdStatValue: event.nerdStat);
           break;
+        case VideoEventType.bitrateUpdate:
+          value = value.copyWith(isPip: false, bitrateValue: event.bitrateUpdate);
+          break;
         case VideoEventType.unknown:
           break;
       }
@@ -342,6 +351,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     String? licenseUrl,
     String? certificateUrl,
     Map<String, String>? drmHeaders,
+    Map<String, String>? extraParams,
     String? activityName,
     String? clearKey,
     String? videoExtension,
@@ -366,6 +376,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
         licenseUrl: licenseUrl,
         certificateUrl: certificateUrl,
         drmHeaders: drmHeaders,
+        extraParams: extraParams,
         activityName: activityName,
         clearKey: clearKey,
         videoExtension: videoExtension,
