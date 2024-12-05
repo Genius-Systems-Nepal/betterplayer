@@ -35,6 +35,7 @@ class VideoPlayerValue {
     this.isPip = false,
     this.nerdStatValue = "",
     this.bitrateValue = 0,
+    this.errorCode = "0"
   });
 
   /// Returns an instance with a `null` [Duration].
@@ -102,6 +103,8 @@ class VideoPlayerValue {
   /// Bitrate
   final int bitrateValue;
 
+  final String errorCode;
+
   /// Returns [size.width] / [size.height] when size is non-null, or `1.0.` when
   /// size is null or the aspect ratio would be less than or equal to 0.0.
   double get aspectRatio {
@@ -131,7 +134,8 @@ class VideoPlayerValue {
     double? speed,
     bool? isPip,
     String? nerdStatValue,
-    int? bitrateValue
+    int? bitrateValue,
+    String? errorCode
   }) {
     return VideoPlayerValue(
       duration: duration ?? this.duration,
@@ -147,7 +151,8 @@ class VideoPlayerValue {
       errorDescription: errorDescription ?? this.errorDescription,
       isPip: isPip ?? this.isPip,
       nerdStatValue: nerdStatValue ?? this.nerdStatValue,
-      bitrateValue: bitrateValue ?? this.bitrateValue
+      bitrateValue: bitrateValue ?? this.bitrateValue,
+      errorCode: errorCode ?? this.errorCode
     );
   }
 
@@ -278,7 +283,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     void errorListener(Object object) {
       if (object is PlatformException) {
         final PlatformException e = object;
-        value = value.copyWith(errorDescription: '${e.message} ${e.details}');
+        value = value.copyWith(errorDescription: '${e.message} ${e.details}', errorCode: e.details);
       } else {
         value.copyWith(errorDescription: object.toString());
       }
