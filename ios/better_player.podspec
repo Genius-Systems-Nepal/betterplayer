@@ -20,6 +20,7 @@ A new flutter plugin project.
   s.dependency 'HLSCachingReverseProxyServer'
   s.dependency 'PINCache'
   s.dependency 'GoogleAds-IMA-iOS-SDK', '~> 3.16.3'
+  s.dependency 'Alamofire'
   
   s.platform = :ios, '11.0'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'VALID_ARCHS[sdk=iphonesimulator*]' => 'x86_64' }
