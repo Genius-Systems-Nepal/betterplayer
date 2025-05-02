@@ -230,9 +230,6 @@ internal class BetterPlayer(
         var dataSourceFactory: DataSource.Factory?
         val userAgent = getUserAgent(headers)
 
-        val drmToken: String? = drmHeaders?.get("drm_token")
-
-
         val drmToken: String? = extraParams?.get("drm_token")
 
         if (licenseUrl != null && licenseUrl.isNotEmpty()) {
