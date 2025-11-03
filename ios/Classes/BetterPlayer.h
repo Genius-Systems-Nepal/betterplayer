@@ -36,6 +36,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic) float playerRate;
 @property(nonatomic) int overriddenDuration;
 @property(nonatomic) AVPlayerTimeControlStatus lastAvPlayerTimeControlStatus;
+@property(nonatomic, copy) NSString *videoId;
 
 @property(nonatomic) IMAAVPlayerContentPlayhead* contentPlayhead;
 @property(nonatomic) IMAAdsLoader* adsLoader;
@@ -52,7 +53,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (int64_t) duration;
 - (int64_t) position;
 
-- (instancetype)initWithFrame:(CGRect)frame;
+//- (instancetype)initWithFrame:(CGRect)frame;
+- (instancetype)initWithFrame:(CGRect)frame videoId:(NSString *)videoId;
 - (void)setMixWithOthers:(bool)mixWithOthers;
 - (void)seekTo:(int)location;
 - (void)setDataSourceAsset:(NSString*)asset withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration withDrmToken: (NSString *)drmToken;

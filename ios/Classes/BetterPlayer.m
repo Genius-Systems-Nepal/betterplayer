@@ -26,7 +26,7 @@ AVPictureInPictureController *_pipController;
     double lastBitRate;
 }
 
-- (instancetype)initWithFrame:(CGRect)frame {
+- (instancetype)initWithFrame:(CGRect)frame videoId:(NSString *)videoId {
     self = [super init];
     NSAssert(self, @"super init cannot be nil");
     _isInitialized = false;
@@ -49,6 +49,8 @@ AVPictureInPictureController *_pipController;
     if (@available(iOS 10.0, *)) {
         _player.automaticallyWaitsToMinimizeStalling = false;
     }
+    [QuanteecHelper clean];
+    [QuanteecHelper setupWithPlayer:_player videoID:videoId];
     self._observersAdded = false;
     return self;
 }
@@ -136,7 +138,7 @@ AVPictureInPictureController *_pipController;
     if (_player.currentItem == nil) {
         return;
     }
-
+    [QuanteecHelper clean];
     [self removeObservers];
     AVAsset* asset = [_player.currentItem asset];
     [asset cancelLoading];
@@ -875,6 +877,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     [_eventChannel setStreamHandler:nil];
     [self disablePictureInPicture];
     [self setPictureInPicture:false];
+    [QuanteecHelper clean];
     _disposed = true;
 }
 

@@ -289,7 +289,20 @@ bool _remoteCommandsInitialized = false;
         [_players removeAllObjects];
         result(nil);
     } else if ([@"create" isEqualToString:call.method]) {
-        BetterPlayer* player = [[BetterPlayer alloc] initWithFrame:CGRectZero];
+
+        NSDictionary *args = (NSDictionary *)call.arguments;
+        NSString *videoId = @"";
+
+        if ([args isKindOfClass:[NSDictionary class]] && args[@"videoId"] != [NSNull null]) {
+            if ([args[@"videoId"] isKindOfClass:[NSString class]]) {
+                videoId = args[@"videoId"];
+            } else {
+                videoId = [NSString stringWithFormat:@"%@", args[@"videoId"]];
+            }
+        }
+
+
+        BetterPlayer* player = [[BetterPlayer alloc] initWithFrame:CGRectZero videoId:videoId];
         [self onPlayerSetup:player result:result];
     } else {
         NSDictionary* argsMap = call.arguments;
