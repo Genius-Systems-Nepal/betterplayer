@@ -75,6 +75,8 @@ class BetterPlayerDataSource {
   /// BetterPlayerConfiguration.
   final Widget? placeholder;
 
+  final String? videoId;
+
   ///Configuration of video buffering. Currently only supported in Android
   ///platform.
   final BetterPlayerBufferingConfiguration bufferingConfiguration;
@@ -82,8 +84,8 @@ class BetterPlayerDataSource {
   BetterPlayerDataSource(
     this.type,
     this.url, {
-        this.adsUrl,
-        this.bytes,
+    this.adsUrl,
+    this.bytes,
     this.subtitles,
     this.liveStream = false,
     this.headers,
@@ -102,6 +104,7 @@ class BetterPlayerDataSource {
     this.videoExtension,
     this.drmConfiguration,
     this.placeholder,
+    this.videoId,
     this.bufferingConfiguration = const BetterPlayerBufferingConfiguration(),
   }) : assert(
             (type == BetterPlayerDataSourceType.network ||
@@ -114,8 +117,8 @@ class BetterPlayerDataSource {
   ///Bytes parameter is not used in this data source.
   factory BetterPlayerDataSource.network(
     String url, {
-        String? adsUrl,
-        List<BetterPlayerSubtitlesSource>? subtitles,
+    String? adsUrl,
+    List<BetterPlayerSubtitlesSource>? subtitles,
     bool? liveStream,
     Map<String, String>? headers,
     bool? useAsmsSubtitles,
@@ -129,6 +132,7 @@ class BetterPlayerDataSource {
     BetterPlayerVideoFormat? videoFormat,
     BetterPlayerDrmConfiguration? drmConfiguration,
     Widget? placeholder,
+    String? videoId,
     BetterPlayerBufferingConfiguration bufferingConfiguration =
         const BetterPlayerBufferingConfiguration(),
   }) {
@@ -150,68 +154,65 @@ class BetterPlayerDataSource {
       drmConfiguration: drmConfiguration,
       placeholder: placeholder,
       bufferingConfiguration: bufferingConfiguration,
+      videoId: videoId,
     );
   }
 
   ///Factory method to build file data source which uses url as data source.
   ///Bytes parameter is not used in this data source.
-  factory BetterPlayerDataSource.file(
-    String url, {
-        String? adsUrl,
-        List<BetterPlayerSubtitlesSource>? subtitles,
-    bool? useAsmsSubtitles,
-    bool? useAsmsTracks,
-    Map<String, String>? qualities,
-    BetterPlayerCacheConfiguration? cacheConfiguration,
-    BetterPlayerNotificationConfiguration? notificationConfiguration,
-    Duration? overriddenDuration,
-    Widget? placeholder,
-  }) {
-    return BetterPlayerDataSource(
-      BetterPlayerDataSourceType.file,
-      url,
-      adsUrl: adsUrl,
-      subtitles: subtitles,
-      useAsmsSubtitles: useAsmsSubtitles,
-      useAsmsTracks: useAsmsTracks,
-      resolutions: qualities,
-      cacheConfiguration: cacheConfiguration,
-      notificationConfiguration: notificationConfiguration =
-          const BetterPlayerNotificationConfiguration(showNotification: false),
-      overriddenDuration: overriddenDuration,
-      placeholder: placeholder,
-    );
+  factory BetterPlayerDataSource.file(String url,
+      {String? adsUrl,
+      List<BetterPlayerSubtitlesSource>? subtitles,
+      bool? useAsmsSubtitles,
+      bool? useAsmsTracks,
+      Map<String, String>? qualities,
+      BetterPlayerCacheConfiguration? cacheConfiguration,
+      BetterPlayerNotificationConfiguration? notificationConfiguration,
+      Duration? overriddenDuration,
+      Widget? placeholder,
+      String? videoId}) {
+    return BetterPlayerDataSource(BetterPlayerDataSourceType.file, url,
+        adsUrl: adsUrl,
+        subtitles: subtitles,
+        useAsmsSubtitles: useAsmsSubtitles,
+        useAsmsTracks: useAsmsTracks,
+        resolutions: qualities,
+        cacheConfiguration: cacheConfiguration,
+        notificationConfiguration: notificationConfiguration =
+            const BetterPlayerNotificationConfiguration(
+                showNotification: false),
+        overriddenDuration: overriddenDuration,
+        placeholder: placeholder,
+        videoId: videoId);
   }
 
   ///Factory method to build network data source which uses bytes as data source.
   ///Url parameter is not used in this data source.
-  factory BetterPlayerDataSource.memory(
-    List<int> bytes, {
-    String? videoExtension,
-    List<BetterPlayerSubtitlesSource>? subtitles,
-    bool? useAsmsSubtitles,
-    bool? useAsmsTracks,
-    Map<String, String>? qualities,
-    BetterPlayerCacheConfiguration? cacheConfiguration,
-    BetterPlayerNotificationConfiguration? notificationConfiguration,
-    Duration? overriddenDuration,
-    Widget? placeholder,
-  }) {
-    return BetterPlayerDataSource(
-      BetterPlayerDataSourceType.memory,
-      "",
-      videoExtension: videoExtension,
-      bytes: bytes,
-      subtitles: subtitles,
-      useAsmsSubtitles: useAsmsSubtitles,
-      useAsmsTracks: useAsmsTracks,
-      resolutions: qualities,
-      cacheConfiguration: cacheConfiguration,
-      notificationConfiguration: notificationConfiguration =
-          const BetterPlayerNotificationConfiguration(showNotification: false),
-      overriddenDuration: overriddenDuration,
-      placeholder: placeholder,
-    );
+  factory BetterPlayerDataSource.memory(List<int> bytes,
+      {String? videoExtension,
+      List<BetterPlayerSubtitlesSource>? subtitles,
+      bool? useAsmsSubtitles,
+      bool? useAsmsTracks,
+      Map<String, String>? qualities,
+      BetterPlayerCacheConfiguration? cacheConfiguration,
+      BetterPlayerNotificationConfiguration? notificationConfiguration,
+      Duration? overriddenDuration,
+      Widget? placeholder,
+      String? videoId}) {
+    return BetterPlayerDataSource(BetterPlayerDataSourceType.memory, "",
+        videoExtension: videoExtension,
+        bytes: bytes,
+        subtitles: subtitles,
+        useAsmsSubtitles: useAsmsSubtitles,
+        useAsmsTracks: useAsmsTracks,
+        resolutions: qualities,
+        cacheConfiguration: cacheConfiguration,
+        notificationConfiguration: notificationConfiguration =
+            const BetterPlayerNotificationConfiguration(
+                showNotification: false),
+        overriddenDuration: overriddenDuration,
+        placeholder: placeholder,
+        videoId: videoId);
   }
 
   BetterPlayerDataSource copyWith({
@@ -234,6 +235,7 @@ class BetterPlayerDataSource {
     String? videoExtension,
     BetterPlayerDrmConfiguration? drmConfiguration,
     Widget? placeholder,
+    String? videoId,
     BetterPlayerBufferingConfiguration? bufferingConfiguration =
         const BetterPlayerBufferingConfiguration(),
   }) {
@@ -257,6 +259,7 @@ class BetterPlayerDataSource {
       videoExtension: videoExtension ?? this.videoExtension,
       drmConfiguration: drmConfiguration ?? this.drmConfiguration,
       placeholder: placeholder ?? this.placeholder,
+      videoId: videoId,
       bufferingConfiguration:
           bufferingConfiguration ?? this.bufferingConfiguration,
     );

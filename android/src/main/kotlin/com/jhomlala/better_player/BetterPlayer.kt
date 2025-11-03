@@ -74,6 +74,10 @@ import java.util.*
 import kotlin.math.max
 import kotlin.math.min
 import com.google.android.exoplayer2.analytics.AnalyticsListener.EventTime
+import com.quanteec.plugin.settings.QuanteecConfig
+import com.quanteec.quanteecexoplugin2_17.QuanteecBaseDataSource
+import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecBandwidthMeters
+import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecExoCore
 
 internal class BetterPlayer(
     context: Context,
@@ -81,7 +85,8 @@ internal class BetterPlayer(
     private val textureEntry: SurfaceTextureEntry,
     customDefaultLoadControl: CustomDefaultLoadControl?,
     result: MethodChannel.Result,
-    act: Activity
+    act: Activity,
+    videoId: String
 ) {
     private val exoPlayer: ExoPlayer?
     private val eventSink = QueuingEventSink()
@@ -110,6 +115,10 @@ internal class BetterPlayer(
     private val activity = act
     private val adsLayout = FrameLayout(act)
     private var isAdPlay = false
+
+    var quanteecConfig: QuanteecConfig? = null
+    var quanteecCore: QuanteecExoCore? = null
+
     init {
         val loadBuilder = DefaultLoadControl.Builder()
         loadBuilder.setBufferDurationsMs(
@@ -123,51 +132,71 @@ internal class BetterPlayer(
 
         val adsLoader =
             ImaAdsLoader.Builder(context).setAdEventListener { adEvent ->
-                if(adEvent.type == AdEvent.AdEventType.AD_BREAK_ENDED
-                    || adEvent.type == AdEvent.AdEventType.COMPLETED || adEvent.type == AdEvent.AdEventType.SKIPPED){
-                      isAdPlay = false
+                if (adEvent.type == AdEvent.AdEventType.AD_BREAK_ENDED
+                    || adEvent.type == AdEvent.AdEventType.COMPLETED || adEvent.type == AdEvent.AdEventType.SKIPPED
+                ) {
+                    isAdPlay = false
                     isInitialized = false
                     removeAdsView()
-                } else if(adEvent.type == AdEvent.AdEventType.STARTED || adEvent.type == AdEvent.AdEventType.LOADED){
+                } else if (adEvent.type == AdEvent.AdEventType.STARTED || adEvent.type == AdEvent.AdEventType.LOADED) {
                     isAdPlay = true
-                } else if(adEvent.type == AdEvent.AdEventType.AD_BREAK_FETCH_ERROR){
+                } else if (adEvent.type == AdEvent.AdEventType.AD_BREAK_FETCH_ERROR) {
                     isAdPlay = false
                     isInitialized = false
                     removeAdsView()
                 }
-            }.setAdErrorListener{ adError ->
+            }.setAdErrorListener { adError ->
                 isInitialized = false
                 removeAdsView()
             }.build()
         val dataSourceFactory: DataSource.Factory = DefaultDataSourceFactory(context, "Livetv")
-        val mediaSourceFactory: MediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
-            .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
-            .setAdViewProvider{
-                val statusBarHeight =
-                    Math.ceil((25 * context.resources.displayMetrics.density).toDouble()).toInt()
-
-                val width =  activity.resources.displayMetrics.widthPixels
-                val height =  (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
-                val lp: FrameLayout.LayoutParams =
-                    FrameLayout.LayoutParams(width, height)
-                adsLayout.layoutParams = lp
-                val view = activity.findViewById(android.R.id.content) as ViewGroup
-                view.addView(adsLayout)
-                adsLayout.bringToFront()
-                adsLayout
-            }
 
         val renderersFactory = DefaultRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
             .setMediaCodecSelector { mimeType, _, requiresTunnelingDecoder ->
-                MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, false, requiresTunnelingDecoder)
+                MediaCodecSelector.DEFAULT.getDecoderInfos(
+                    mimeType,
+                    false,
+                    requiresTunnelingDecoder
+                )
             }
+
+        quanteecConfig =
+            QuanteecConfig.Builder("10a09cc682df4918a6f2c0edf1ba165a")
+                .setVideoID(videoId).build()
+        quanteecCore = QuanteecExoCore(context, quanteecConfig!!)
+
+        val quanteecDataSourceFactory = QuanteecBaseDataSource.Factory(quanteecCore!!)
+        val quanteecBandwidthMeters = QuanteecBandwidthMeters.Builder(context).build()
+
+        val mediaSourceFactory: MediaSourceFactory =
+            DefaultMediaSourceFactory(quanteecDataSourceFactory)
+                .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
+                .setAdViewProvider {
+                    val statusBarHeight =
+                        Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
+                            .toInt()
+
+                    val width = activity.resources.displayMetrics.widthPixels
+                    val height =
+                        (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
+                    val lp: FrameLayout.LayoutParams =
+                        FrameLayout.LayoutParams(width, height)
+                    adsLayout.layoutParams = lp
+                    val view = activity.findViewById(android.R.id.content) as ViewGroup
+                    view.addView(adsLayout)
+                    adsLayout.bringToFront()
+                    adsLayout
+                }
 
         exoPlayer = ExoPlayer.Builder(context, renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
-            .build()
+            .setBandwidthMeter(
+                quanteecBandwidthMeters
+            ).build()
+
         adsLoader.setPlayer(exoPlayer)
         workManager = WorkManager.getInstance(context)
         workerObserverMap = HashMap()
@@ -182,7 +211,7 @@ internal class BetterPlayer(
         setupVideoPlayer(eventChannel, textureEntry, result)
     }
 
-    fun removeAdsView(){
+    fun removeAdsView() {
         val view = activity.findViewById(android.R.id.content) as ViewGroup
         if (adsLayout != null) {
             isAdPlay = false
@@ -194,7 +223,7 @@ internal class BetterPlayer(
         return isAdPlay
     }
 
-    fun contentDuration(): Long{
+    fun contentDuration(): Long {
         return exoPlayer!!.duration
     }
 
@@ -279,7 +308,7 @@ internal class BetterPlayer(
         }
         if (uri.toString().contains("rtmp")) {
             dataSourceFactory = buildRtmp()
-        }else if (isHTTP(uri)) {
+        } else if (isHTTP(uri)) {
             dataSourceFactory = getDataSourceFactory(userAgent, headers)
 //            if (useCache && maxCacheSize > 0 && maxCacheFileSize > 0) {
 //                dataSourceFactory = CacheDataSourceFactory(
@@ -310,10 +339,13 @@ internal class BetterPlayer(
 
         exoPlayer?.prepare()
         exoPlayer?.playWhenReady = true
+        exoPlayer?.let {
+            quanteecCore?.setPlayer(it);
+        }
         result.success(null)
     }
 
-    private fun buildRtmp(): DataSource.Factory{
+    private fun buildRtmp(): DataSource.Factory {
         return RtmpDataSource.Factory()
     }
 
@@ -534,21 +566,25 @@ internal class BetterPlayer(
             )
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
+
             C.TYPE_DASH -> DashMediaSource.Factory(
                 DefaultDashChunkSource.Factory(mediaDataSourceFactory),
                 DefaultDataSource.Factory(context, mediaDataSourceFactory)
             )
-                .setDrmSessionManagerProvider(drmSessionManagerProvider)
+                .setDrmSessionManagerProvider(drmSessionManagerProvider!!)
                 .createMediaSource(mediaItem)
+
             C.TYPE_HLS -> HlsMediaSource.Factory(mediaDataSourceFactory)
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
+
             C.TYPE_OTHER -> ProgressiveMediaSource.Factory(
                 mediaDataSourceFactory,
                 DefaultExtractorsFactory()
             )
-                .setDrmSessionManagerProvider(drmSessionManagerProvider)
+                .setDrmSessionManagerProvider(drmSessionManagerProvider!!)
                 .createMediaSource(mediaItem)
+
             else -> {
                 throw IllegalStateException("Unsupported type: $type")
             }
@@ -557,6 +593,9 @@ internal class BetterPlayer(
         exoPlayer?.setMediaSource(mediaSource)
         exoPlayer?.setMediaItem(mediaItem)
         exoPlayer?.playWhenReady = true
+        exoPlayer?.let {
+            quanteecCore?.setPlayer(it);
+        }
     }
 
     private fun setupVideoPlayer(
@@ -593,6 +632,7 @@ internal class BetterPlayer(
                         event["event"] = "bufferingStart"
                         eventSink.success(event)
                     }
+
                     Player.STATE_READY -> {
                         if (!isInitialized) {
                             isInitialized = true
@@ -602,12 +642,14 @@ internal class BetterPlayer(
                         event["event"] = "bufferingEnd"
                         eventSink.success(event)
                     }
+
                     Player.STATE_ENDED -> {
                         val event: MutableMap<String, Any?> = HashMap()
                         event["event"] = "completed"
                         event["key"] = key
                         eventSink.success(event)
                     }
+
                     Player.STATE_IDLE -> {
                         //no-op
                     }
@@ -889,6 +931,8 @@ internal class BetterPlayer(
         eventChannel.setStreamHandler(null)
         surface?.release()
         exoPlayer?.release()
+        quanteecCore?.release()
+        quanteecCore = null
     }
 
     override fun equals(other: Any?): Boolean {

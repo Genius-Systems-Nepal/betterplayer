@@ -35,7 +35,7 @@ class VideoPlayerValue {
     this.isPip = false,
     this.nerdStatValue = "",
     this.bitrateValue = 0,
-    this.errorCode = "0"
+    this.errorCode = "0",
   });
 
   /// Returns an instance with a `null` [Duration].
@@ -190,10 +190,10 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   /// Constructs a [VideoPlayerController] and creates video controller on platform side.
   VideoPlayerController({
     this.bufferingConfiguration = const BetterPlayerBufferingConfiguration(),
-    bool autoCreate = true,
+    bool autoCreate = true, String? videoId,
   }) : super(VideoPlayerValue(duration: null)) {
     if (autoCreate) {
-      _create();
+      _create(videoId);
     }
   }
 
@@ -216,9 +216,10 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   int? get textureId => _textureId;
 
   /// Attempts to open the given [dataSource] and load metadata about the video.
-  Future<void> _create() async {
+  Future<void> _create(String? videoId) async {
     _textureId = await _videoPlayerPlatform.create(
       bufferingConfiguration: bufferingConfiguration,
+      videoId: videoId
     );
     _creatingCompleter.complete(null);
 
