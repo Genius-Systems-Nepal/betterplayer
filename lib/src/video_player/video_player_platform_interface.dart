@@ -67,7 +67,7 @@ abstract class VideoPlayerPlatform {
 
   /// Creates an instance of a video player and returns its textureId.
   Future<int?> create(
-      {BetterPlayerBufferingConfiguration? bufferingConfiguration, String? videoId = ""}) {
+      {BetterPlayerBufferingConfiguration? bufferingConfiguration, Map<String, dynamic>? quanteecConfig}) {
     throw UnimplementedError('create() has not been implemented.');
   }
 

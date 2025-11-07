@@ -21,6 +21,17 @@ buildscript {
     }
 }
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def quanteecUsername = localProperties.getProperty("quanteecUsername") ?: ""
+def quanteecPassword = localProperties.getProperty("quanteecPassword") ?: ""
+
 rootProject.allprojects {
     repositories {
         google()
@@ -28,8 +39,8 @@ rootProject.allprojects {
         maven {
             url 'https://maven.quanteec.com/repository/internal/'
             credentials {
-                username "nettv"
-                password "AccR9Ed4dXRi"
+                username = quanteecUsername
+                password = quanteecPassword
             }
             authentication {
                 basic(BasicAuthentication)

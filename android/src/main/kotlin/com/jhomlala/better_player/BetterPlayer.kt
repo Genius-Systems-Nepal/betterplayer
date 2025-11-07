@@ -86,7 +86,7 @@ internal class BetterPlayer(
     customDefaultLoadControl: CustomDefaultLoadControl?,
     result: MethodChannel.Result,
     act: Activity,
-    videoId: String
+    quanteecConfigData: Map<String, Any?>?
 ) {
     private val exoPlayer: ExoPlayer?
     private val eventSink = QueuingEventSink()
@@ -107,6 +107,7 @@ internal class BetterPlayer(
     private val customDefaultLoadControl: CustomDefaultLoadControl =
         customDefaultLoadControl ?: CustomDefaultLoadControl()
     private var lastSendBufferedPosition = 0L
+
     /// nerdstat
     var startNerdStat = false
     var nerdStatHelper: NerdStatHelper? = null
@@ -161,41 +162,70 @@ internal class BetterPlayer(
                 )
             }
 
-        quanteecConfig =
-            QuanteecConfig.Builder("10a09cc682df4918a6f2c0edf1ba165a")
-                .setVideoID(videoId).build()
-        quanteecCore = QuanteecExoCore(context, quanteecConfig!!)
+        if (quanteecConfigData != null && quanteecConfigData?.get("enableQunateec") == true) {
+            val videoId = quanteecConfigData?.get("videoId") as? String ?: ""
+            val quanteecKey = quanteecConfigData?.get("qunateecKey") as? String ?: ""
 
-        val quanteecDataSourceFactory = QuanteecBaseDataSource.Factory(quanteecCore!!)
-        val quanteecBandwidthMeters = QuanteecBandwidthMeters.Builder(context).build()
+            quanteecConfig = QuanteecConfig.Builder(quanteecKey).setVideoID(videoId).build()
+            quanteecCore = QuanteecExoCore(context, quanteecConfig!!)
 
-        val mediaSourceFactory: MediaSourceFactory =
-            DefaultMediaSourceFactory(quanteecDataSourceFactory)
-                .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
-                .setAdViewProvider {
-                    val statusBarHeight =
-                        Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
-                            .toInt()
+            val quanteecDataSourceFactory = QuanteecBaseDataSource.Factory(quanteecCore!!)
+            val quanteecBandwidthMeters = QuanteecBandwidthMeters.Builder(context).build()
 
-                    val width = activity.resources.displayMetrics.widthPixels
-                    val height =
-                        (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
-                    val lp: FrameLayout.LayoutParams =
-                        FrameLayout.LayoutParams(width, height)
-                    adsLayout.layoutParams = lp
-                    val view = activity.findViewById(android.R.id.content) as ViewGroup
-                    view.addView(adsLayout)
-                    adsLayout.bringToFront()
-                    adsLayout
-                }
+            val mediaSourceFactory: MediaSourceFactory =
+                DefaultMediaSourceFactory(quanteecDataSourceFactory)
+                    .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
+                    .setAdViewProvider {
+                        val statusBarHeight =
+                            Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
+                                .toInt()
 
-        exoPlayer = ExoPlayer.Builder(context, renderersFactory)
-            .setTrackSelector(trackSelector)
-            .setLoadControl(loadControl)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .setBandwidthMeter(
-                quanteecBandwidthMeters
-            ).build()
+                        val width = activity.resources.displayMetrics.widthPixels
+                        val height =
+                            (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
+                        val lp: FrameLayout.LayoutParams =
+                            FrameLayout.LayoutParams(width, height)
+                        adsLayout.layoutParams = lp
+                        val view = activity.findViewById(android.R.id.content) as ViewGroup
+                        view.addView(adsLayout)
+                        adsLayout.bringToFront()
+                        adsLayout
+                    }
+
+            exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+                .setTrackSelector(trackSelector)
+                .setLoadControl(loadControl)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .setBandwidthMeter(
+                    quanteecBandwidthMeters
+                ).build()
+        } else {
+            val mediaSourceFactory: MediaSourceFactory =
+                DefaultMediaSourceFactory(dataSourceFactory)
+                    .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
+                    .setAdViewProvider {
+                        val statusBarHeight =
+                            Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
+                                .toInt()
+
+                        val width = activity.resources.displayMetrics.widthPixels
+                        val height =
+                            (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
+                        val lp: FrameLayout.LayoutParams =
+                            FrameLayout.LayoutParams(width, height)
+                        adsLayout.layoutParams = lp
+                        val view = activity.findViewById(android.R.id.content) as ViewGroup
+                        view.addView(adsLayout)
+                        adsLayout.bringToFront()
+                        adsLayout
+                    }
+
+            exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+                .setTrackSelector(trackSelector)
+                .setLoadControl(loadControl)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build()
+        }
 
         adsLoader.setPlayer(exoPlayer)
         workManager = WorkManager.getInstance(context)
@@ -571,7 +601,7 @@ internal class BetterPlayer(
                 DefaultDashChunkSource.Factory(mediaDataSourceFactory),
                 DefaultDataSource.Factory(context, mediaDataSourceFactory)
             )
-                .setDrmSessionManagerProvider(drmSessionManagerProvider!!)
+                .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
 
             C.TYPE_HLS -> HlsMediaSource.Factory(mediaDataSourceFactory)
@@ -582,7 +612,7 @@ internal class BetterPlayer(
                 mediaDataSourceFactory,
                 DefaultExtractorsFactory()
             )
-                .setDrmSessionManagerProvider(drmSessionManagerProvider!!)
+                .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
 
             else -> {
