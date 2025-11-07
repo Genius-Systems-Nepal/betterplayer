@@ -162,7 +162,7 @@ internal class BetterPlayer(
                 )
             }
 
-        if (quanteecConfigData != null && quanteecConfigData?.get("enableQunateec") == true) {
+        if (quanteecConfigData != null) {
             val videoId = quanteecConfigData?.get("videoId") as? String ?: ""
             val quanteecKey = quanteecConfigData?.get("qunateecKey") as? String ?: ""
 
