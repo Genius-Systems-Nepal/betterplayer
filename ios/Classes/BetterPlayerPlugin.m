@@ -290,12 +290,12 @@ bool _remoteCommandsInitialized = false;
         result(nil);
     } else if ([@"create" isEqualToString:call.method]) {
 
-        NSDictionary *args = (NSDictionary *)call.arguments;
+        NSDictionary *argsMap = (NSDictionary *)call.arguments;
         
         // In case of quanteec config dictionary is passed
         NSDictionary * _Nullable dictQuanteecConfig;
-        if (args[@"quanteecConfig"] != [NSNull null] && [args[@"quanteecConfig"] isKindOfClass:[NSDictionary class]]) {
-            dictQuanteecConfig = args[@"quanteecConfig"];
+        if (argsMap[@"quanteecConfig"] != [NSNull null] && [argsMap[@"quanteecConfig"] isKindOfClass:[NSDictionary class]]) {
+            dictQuanteecConfig = argsMap[@"quanteecConfig"];
         }
 
         BetterPlayer* player = [[BetterPlayer alloc] initWithFrame:CGRectZero dictQuanteecConfig: dictQuanteecConfig];
