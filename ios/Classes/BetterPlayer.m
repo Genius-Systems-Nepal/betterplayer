@@ -11,6 +11,7 @@ static void* playbackLikelyToKeepUpContext = &playbackLikelyToKeepUpContext;
 static void* playbackBufferEmptyContext = &playbackBufferEmptyContext;
 static void* playbackBufferFullContext = &playbackBufferFullContext;
 static void* presentationSizeContext = &presentationSizeContext;
+static void *PlayerItemContext = &PlayerItemContext;
 
 
 #if TARGET_OS_IOS
@@ -24,15 +25,20 @@ AVPictureInPictureController *_pipController;
     BetterPlayerVuDrmAssetsLoaderDelegate *_vuDrmAssetsloaderDelegate;
     BOOL nerdStatActive;
     double lastBitRate;
+    AVPlayerItem *_currentItem;
 }
 
-- (instancetype)initWithFrame:(CGRect)frame videoId:(NSString *)videoId {
+- (instancetype)initWithFrame:(CGRect)frame dictQuanteecConfig:(NSDictionary * _Nullable)dictQuanteecConfig {
     self = [super init];
     NSAssert(self, @"super init cannot be nil");
     _isInitialized = false;
     _isPlaying = false;
     _disposed = false;
     _player = [[AVPlayer alloc] init];
+    
+    if (dictQuanteecConfig) {
+        [QuanteecHelper setupWithPlayer:_player dictQuanteecConfig: dictQuanteecConfig];
+    }
     
     BetterPlayerView *playerView = [[BetterPlayerView alloc] initWithFrame:CGRectZero];
     playerView.player = _player;
@@ -49,8 +55,6 @@ AVPictureInPictureController *_pipController;
     if (@available(iOS 10.0, *)) {
         _player.automaticallyWaitsToMinimizeStalling = false;
     }
-    [QuanteecHelper clean];
-    [QuanteecHelper setupWithPlayer:_player videoID:videoId];
     self._observersAdded = false;
     return self;
 }
@@ -84,7 +88,13 @@ AVPictureInPictureController *_pipController;
 
 - (void)addObservers:(AVPlayerItem*)item {
     if (!self._observersAdded){
+        _currentItem = item;
         [_player addObserver:self forKeyPath:@"rate" options:0 context:nil];
+        // added this observer to observe player item change and update observers accordingly as Quanteec plugin updates the player item with updated play url
+        [_player addObserver:self
+                          forKeyPath:@"currentItem"
+                             options:NSKeyValueObservingOptionNew | NSKeyValueObservingOptionOld
+                             context:PlayerItemContext];
         [item addObserver:self forKeyPath:@"loadedTimeRanges" options:0 context:timeRangeContext];
         [item addObserver:self forKeyPath:@"status" options:0 context:statusContext];
         [item addObserver:self forKeyPath:@"presentationSize" options:0 context:presentationSizeContext];
@@ -138,7 +148,6 @@ AVPictureInPictureController *_pipController;
     if (_player.currentItem == nil) {
         return;
     }
-    [QuanteecHelper clean];
     [self removeObservers];
     AVAsset* asset = [_player.currentItem asset];
     [asset cancelLoading];
@@ -147,18 +156,19 @@ AVPictureInPictureController *_pipController;
 - (void) removeObservers{
     if (self._observersAdded){
         [_player removeObserver:self forKeyPath:@"rate" context:nil];
-        [[_player currentItem] removeObserver:self forKeyPath:@"status" context:statusContext];
-        [[_player currentItem] removeObserver:self forKeyPath:@"presentationSize" context:presentationSizeContext];
-        [[_player currentItem] removeObserver:self
+        // observer removed from _currentItem instead of [_player currentItem] because item which was observed might be replaced which causes crash. The case was observed in quanteec plugin
+        [_currentItem removeObserver:self forKeyPath:@"status" context:statusContext];
+        [_currentItem removeObserver:self forKeyPath:@"presentationSize" context:presentationSizeContext];
+        [_currentItem removeObserver:self
                                    forKeyPath:@"loadedTimeRanges"
                                       context:timeRangeContext];
-        [[_player currentItem] removeObserver:self
+        [_currentItem removeObserver:self
                                    forKeyPath:@"playbackLikelyToKeepUp"
                                       context:playbackLikelyToKeepUpContext];
-        [[_player currentItem] removeObserver:self
+        [_currentItem removeObserver:self
                                    forKeyPath:@"playbackBufferEmpty"
                                       context:playbackBufferEmptyContext];
-        [[_player currentItem] removeObserver:self
+        [_currentItem removeObserver:self
                                    forKeyPath:@"playbackBufferFull"
                                       context:playbackBufferFullContext];
         [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -419,7 +429,16 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         }
     }
 
-    if (context == timeRangeContext) {
+    if (context == PlayerItemContext && [path isEqualToString:@"currentItem"]) {
+            AVPlayerItem *newItem = change[NSKeyValueChangeNewKey];
+            AVPlayerItem *oldItem = change[NSKeyValueChangeOldKey];
+            
+            if (newItem != (id)[NSNull null]) {
+                [self removeObservers];
+                [self addObservers: newItem];
+            }
+    }
+    else if (context == timeRangeContext) {
         if (_eventSink != nil) {
             NSMutableArray<NSArray<NSNumber*>*>* values = [[NSMutableArray alloc] init];
             for (NSValue* rangeValue in [object loadedTimeRanges]) {
@@ -877,7 +896,6 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     [_eventChannel setStreamHandler:nil];
     [self disablePictureInPicture];
     [self setPictureInPicture:false];
-    [QuanteecHelper clean];
     _disposed = true;
 }
 

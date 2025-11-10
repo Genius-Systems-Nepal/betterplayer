@@ -291,18 +291,14 @@ bool _remoteCommandsInitialized = false;
     } else if ([@"create" isEqualToString:call.method]) {
 
         NSDictionary *args = (NSDictionary *)call.arguments;
-        NSString *videoId = @"";
-
-        if ([args isKindOfClass:[NSDictionary class]] && args[@"videoId"] != [NSNull null]) {
-            if ([args[@"videoId"] isKindOfClass:[NSString class]]) {
-                videoId = args[@"videoId"];
-            } else {
-                videoId = [NSString stringWithFormat:@"%@", args[@"videoId"]];
-            }
+        
+        // In case of quanteec config dictionary is passed
+        NSDictionary * _Nullable dictQuanteecConfig;
+        if (args[@"quanteecConfig"] != [NSNull null] && [args[@"quanteecConfig"] isKindOfClass:[NSDictionary class]]) {
+            dictQuanteecConfig = args[@"quanteecConfig"];
         }
 
-
-        BetterPlayer* player = [[BetterPlayer alloc] initWithFrame:CGRectZero videoId:videoId];
+        BetterPlayer* player = [[BetterPlayer alloc] initWithFrame:CGRectZero dictQuanteecConfig: dictQuanteecConfig];
         [self onPlayerSetup:player result:result];
     } else {
         NSDictionary* argsMap = call.arguments;
