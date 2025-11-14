@@ -1,11 +1,11 @@
 import Foundation
 import AVKit
-import QuanteecCore
-import QuanteecPluginAVPlayer
+// import QuanteecCore
+// import QuanteecPluginAVPlayer
 
 @objc public class QuanteecHelper: NSObject {
 
-    private static var plugin: QuanteecPlugin?
+//     private static var plugin: QuanteecPlugin?
     
     @objc public static func setup(player: AVPlayer, dictQuanteecConfig: [String: Any]) {
         
@@ -16,8 +16,8 @@ import QuanteecPluginAVPlayer
         
 //         print("quanteec === key = \(key) videoId = \(videoId)")
         
-        QuanteecConfig.configure(quanteecKey: key)
-        QuanteecConfig.shared.videoID = videoId
-        QuanteecHelper.plugin = QuanteecPlugin(player: player)
+//         QuanteecConfig.configure(quanteecKey: key)
+//         QuanteecConfig.shared.videoID = videoId
+//         QuanteecHelper.plugin = QuanteecPlugin(player: player)
     }
 }
