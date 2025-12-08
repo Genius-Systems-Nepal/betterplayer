@@ -74,6 +74,10 @@ import java.util.*
 import kotlin.math.max
 import kotlin.math.min
 import com.google.android.exoplayer2.analytics.AnalyticsListener.EventTime
+import com.quanteec.plugin.settings.QuanteecConfig
+import com.quanteec.quanteecexoplugin2_17.QuanteecBaseDataSource
+import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecBandwidthMeters
+import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecExoCore
 
 internal class BetterPlayer(
     context: Context,
@@ -81,7 +85,8 @@ internal class BetterPlayer(
     private val textureEntry: SurfaceTextureEntry,
     customDefaultLoadControl: CustomDefaultLoadControl?,
     result: MethodChannel.Result,
-    act: Activity
+    act: Activity,
+    quanteecConfigData: Map<String, Any?>?
 ) {
     private val exoPlayer: ExoPlayer?
     private val eventSink = QueuingEventSink()
@@ -102,6 +107,7 @@ internal class BetterPlayer(
     private val customDefaultLoadControl: CustomDefaultLoadControl =
         customDefaultLoadControl ?: CustomDefaultLoadControl()
     private var lastSendBufferedPosition = 0L
+
     /// nerdstat
     var startNerdStat = false
     var nerdStatHelper: NerdStatHelper? = null
@@ -110,6 +116,10 @@ internal class BetterPlayer(
     private val activity = act
     private val adsLayout = FrameLayout(act)
     private var isAdPlay = false
+
+    var quanteecConfig: QuanteecConfig? = null
+    var quanteecCore: QuanteecExoCore? = null
+
     init {
         val loadBuilder = DefaultLoadControl.Builder()
         loadBuilder.setBufferDurationsMs(
@@ -123,51 +133,100 @@ internal class BetterPlayer(
 
         val adsLoader =
             ImaAdsLoader.Builder(context).setAdEventListener { adEvent ->
-                if(adEvent.type == AdEvent.AdEventType.AD_BREAK_ENDED
-                    || adEvent.type == AdEvent.AdEventType.COMPLETED || adEvent.type == AdEvent.AdEventType.SKIPPED){
-                      isAdPlay = false
+                if (adEvent.type == AdEvent.AdEventType.AD_BREAK_ENDED
+                    || adEvent.type == AdEvent.AdEventType.COMPLETED || adEvent.type == AdEvent.AdEventType.SKIPPED
+                ) {
+                    isAdPlay = false
                     isInitialized = false
                     removeAdsView()
-                } else if(adEvent.type == AdEvent.AdEventType.STARTED || adEvent.type == AdEvent.AdEventType.LOADED){
+                } else if (adEvent.type == AdEvent.AdEventType.STARTED || adEvent.type == AdEvent.AdEventType.LOADED) {
                     isAdPlay = true
-                } else if(adEvent.type == AdEvent.AdEventType.AD_BREAK_FETCH_ERROR){
+                } else if (adEvent.type == AdEvent.AdEventType.AD_BREAK_FETCH_ERROR) {
                     isAdPlay = false
                     isInitialized = false
                     removeAdsView()
                 }
-            }.setAdErrorListener{ adError ->
+            }.setAdErrorListener { adError ->
                 isInitialized = false
                 removeAdsView()
             }.build()
         val dataSourceFactory: DataSource.Factory = DefaultDataSourceFactory(context, "Livetv")
-        val mediaSourceFactory: MediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
-            .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
-            .setAdViewProvider{
-                val statusBarHeight =
-                    Math.ceil((25 * context.resources.displayMetrics.density).toDouble()).toInt()
-
-                val width =  activity.resources.displayMetrics.widthPixels
-                val height =  (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
-                val lp: FrameLayout.LayoutParams =
-                    FrameLayout.LayoutParams(width, height)
-                adsLayout.layoutParams = lp
-                val view = activity.findViewById(android.R.id.content) as ViewGroup
-                view.addView(adsLayout)
-                adsLayout.bringToFront()
-                adsLayout
-            }
 
         val renderersFactory = DefaultRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
             .setMediaCodecSelector { mimeType, _, requiresTunnelingDecoder ->
-                MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, false, requiresTunnelingDecoder)
+                MediaCodecSelector.DEFAULT.getDecoderInfos(
+                    mimeType,
+                    false,
+                    requiresTunnelingDecoder
+                )
             }
 
-        exoPlayer = ExoPlayer.Builder(context, renderersFactory)
-            .setTrackSelector(trackSelector)
-            .setLoadControl(loadControl)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .build()
+        if (quanteecConfigData != null) {
+            val videoId = quanteecConfigData?.get("videoId") as? String ?: ""
+            val quanteecKey = quanteecConfigData?.get("qunateecKey") as? String ?: ""
+
+            quanteecConfig = QuanteecConfig.Builder(quanteecKey).setVideoID(videoId).build()
+            quanteecCore = QuanteecExoCore(context, quanteecConfig!!)
+
+            val quanteecDataSourceFactory = QuanteecBaseDataSource.Factory(quanteecCore!!)
+            val quanteecBandwidthMeters = QuanteecBandwidthMeters.Builder(context).build()
+
+            val mediaSourceFactory: MediaSourceFactory =
+                DefaultMediaSourceFactory(quanteecDataSourceFactory)
+                    .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
+                    .setAdViewProvider {
+                        val statusBarHeight =
+                            Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
+                                .toInt()
+
+                        val width = activity.resources.displayMetrics.widthPixels
+                        val height =
+                            (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
+                        val lp: FrameLayout.LayoutParams =
+                            FrameLayout.LayoutParams(width, height)
+                        adsLayout.layoutParams = lp
+                        val view = activity.findViewById(android.R.id.content) as ViewGroup
+                        view.addView(adsLayout)
+                        adsLayout.bringToFront()
+                        adsLayout
+                    }
+
+            exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+                .setTrackSelector(trackSelector)
+                .setLoadControl(loadControl)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .setBandwidthMeter(
+                    quanteecBandwidthMeters
+                ).build()
+        } else {
+            val mediaSourceFactory: MediaSourceFactory =
+                DefaultMediaSourceFactory(dataSourceFactory)
+                    .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
+                    .setAdViewProvider {
+                        val statusBarHeight =
+                            Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
+                                .toInt()
+
+                        val width = activity.resources.displayMetrics.widthPixels
+                        val height =
+                            (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
+                        val lp: FrameLayout.LayoutParams =
+                            FrameLayout.LayoutParams(width, height)
+                        adsLayout.layoutParams = lp
+                        val view = activity.findViewById(android.R.id.content) as ViewGroup
+                        view.addView(adsLayout)
+                        adsLayout.bringToFront()
+                        adsLayout
+                    }
+
+            exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+                .setTrackSelector(trackSelector)
+                .setLoadControl(loadControl)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build()
+        }
+
         adsLoader.setPlayer(exoPlayer)
         workManager = WorkManager.getInstance(context)
         workerObserverMap = HashMap()
@@ -182,7 +241,7 @@ internal class BetterPlayer(
         setupVideoPlayer(eventChannel, textureEntry, result)
     }
 
-    fun removeAdsView(){
+    fun removeAdsView() {
         val view = activity.findViewById(android.R.id.content) as ViewGroup
         if (adsLayout != null) {
             isAdPlay = false
@@ -194,7 +253,7 @@ internal class BetterPlayer(
         return isAdPlay
     }
 
-    fun contentDuration(): Long{
+    fun contentDuration(): Long {
         return exoPlayer!!.duration
     }
 
@@ -279,7 +338,7 @@ internal class BetterPlayer(
         }
         if (uri.toString().contains("rtmp")) {
             dataSourceFactory = buildRtmp()
-        }else if (isHTTP(uri)) {
+        } else if (isHTTP(uri)) {
             dataSourceFactory = getDataSourceFactory(userAgent, headers)
 //            if (useCache && maxCacheSize > 0 && maxCacheFileSize > 0) {
 //                dataSourceFactory = CacheDataSourceFactory(
@@ -292,21 +351,6 @@ internal class BetterPlayer(
         } else {
             dataSourceFactory = DefaultDataSource.Factory(context)
         }
-
-        if (!licenseUrl.isNullOrEmpty() && !drmToken.isNullOrEmpty()) {
-            val drmMediaSource = buildDrmMediaSource(uri, context, drmToken, licenseUrl)
-            exoPlayer?.setMediaSource(drmMediaSource)
-        } else {
-            buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
-//            val mediaSource = buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
-//            if (overriddenDuration != 0L) {
-//                val clippingMediaSource = ClippingMediaSource(mediaSource, 0, overriddenDuration * 1000)
-//                exoPlayer?.setMediaSource(clippingMediaSource)
-//            } else {
-//                exoPlayer?.setMediaSource(mediaSource)
-//            }
-        }
-
 
         if (!licenseUrl.isNullOrEmpty() && !drmToken.isNullOrEmpty()) {
             val drmHelper = DrmHelper()
@@ -325,170 +369,13 @@ internal class BetterPlayer(
 
         exoPlayer?.prepare()
         exoPlayer?.playWhenReady = true
+        exoPlayer?.let {
+            quanteecCore?.setPlayer(it);
+        }
         result.success(null)
     }
 
-    private fun buildDrmMediaSource(
-        uri: Uri,
-        context: Context,
-        drmToken: String,
-        licenseUrl: String
-    ): MediaSource {
-        val defaultDrmSessionManager =
-            DefaultDrmSessionManager.Builder().build(object : MediaDrmCallback {
-                @Throws(MediaDrmCallbackException::class)
-                override fun executeProvisionRequest(
-                    uuid: UUID,
-                    request: ExoMediaDrm.ProvisionRequest
-                ): ByteArray {
-                    try {
-                        val url = request.defaultUrl + "&signedRequest=" + String(request.data)
-                        return executePost(url)
-                    } catch (e: IOException) {
-                        e.printStackTrace()
-                    }
-
-                    return ByteArray(0)
-                }
-
-                @Throws(MediaDrmCallbackException::class)
-                override fun executeKeyRequest(
-                    uuid: UUID,
-                    request: ExoMediaDrm.KeyRequest
-                ): ByteArray {
-                    val postParameters: MutableMap<String, String> = HashMap()
-                    postParameters["kid"] = ""
-                    postParameters["token"] = drmToken
-                    try {
-                        return executePost(request.data, postParameters, licenseUrl)
-                    } catch (e: IOException) {
-                        e.printStackTrace()
-                    }
-
-                    return ByteArray(0)
-                }
-            })
-
-        defaultDrmSessionManager.setMode(
-            DefaultDrmSessionManager.MODE_PLAYBACK,
-            null
-        )
-
-        val drmSessionManagerProvider = DrmSessionManagerProvider {
-            defaultDrmSessionManager
-        }
-
-        return buildDashMediaSource(drmSessionManagerProvider, context, uri)
-    }
-
-    private fun buildDashMediaSource(drmSessionManager: DrmSessionManagerProvider, context: Context, uri: Uri): DashMediaSource {
-        val dashChunkSourceFactory: DashChunkSource.Factory =
-            DefaultDashChunkSource.Factory(DefaultHttpDataSource.Factory())
-        val manifestDataSourceFactory: DefaultHttpDataSource.Factory =
-            DefaultHttpDataSource.Factory()
-        return DashMediaSource.Factory(dashChunkSourceFactory, manifestDataSourceFactory)
-            .setDrmSessionManagerProvider(drmSessionManager)
-            .createMediaSource(
-                MediaItem.Builder()
-                    .setUri(uri).build()
-            )
-    }
-
-    @Throws(IOException::class)
-    private fun executePost(bytearray: ByteArray, requestProperties: Map<String, String>, licenseUrl: String): ByteArray {
-        var data: ByteArray? = bytearray
-        var urlConnection: HttpURLConnection? = null
-        try {
-            urlConnection =
-                URL(licenseUrl).openConnection() as HttpURLConnection
-            urlConnection.requestMethod = "POST"
-            urlConnection.doOutput = true
-            urlConnection.doInput = true
-            urlConnection.setRequestProperty("Content-Type", "application/json")
-            urlConnection.connectTimeout = 30000
-            urlConnection.readTimeout = 30000
-
-            val json = JSONObject()
-            try {
-                val jsonArray = JSONArray()
-                val bitmask = 0x000000FF
-                for (aData in data!!) {
-                    val `val` = aData.toInt()
-                    jsonArray.put(bitmask and `val`)
-                }
-
-                json.put("token", requestProperties["token"])
-                json.put("drm_info", jsonArray)
-                json.put("kid", requestProperties["kid"])
-            } catch (e: JSONException) {
-                e.printStackTrace()
-            }
-
-            data = json.toString().toByteArray(StandardCharsets.UTF_8)
-
-            val out = urlConnection.outputStream
-            out.use {
-                it.write(data)
-            }
-
-            val responseCode = urlConnection.responseCode
-            if (responseCode < 400) {
-                // Read and return the response body.
-                val inputStream = urlConnection.inputStream
-                inputStream.use { input ->
-                    val byteArrayOutputStream = ByteArrayOutputStream()
-                    val scratch = ByteArray(1024)
-                    var bytesRead: Int
-                    while ((input.read(scratch).also { bytesRead = it }) != -1) {
-                        byteArrayOutputStream.write(scratch, 0, bytesRead)
-                    }
-                    return byteArrayOutputStream.toByteArray()
-                }
-            } else {
-                throw IOException()
-            }
-        } finally {
-            urlConnection?.disconnect()
-        }
-    }
-
-    @Throws(IOException::class)
-    private fun executePost(
-        url: String?
-    ): ByteArray {
-        val data: ByteArray? = null
-        val requestProperties: Map<String?, String?>? = null
-        var urlConnection: HttpURLConnection? = null
-        try {
-            urlConnection = URL(url).openConnection() as HttpURLConnection
-            urlConnection.requestMethod = "POST"
-            urlConnection.doOutput = data != null
-            urlConnection.doInput = true
-            if (requestProperties != null) {
-                for ((key1, value) in requestProperties) {
-                    urlConnection.setRequestProperty(key1, value)
-                }
-            }
-            // Write the request body, if there is one.
-            if (data != null) {
-                val out = urlConnection.outputStream
-                out.use {
-                    it.write(data)
-                }
-            }
-            // Read and return the response body.
-            val inputStream = urlConnection.inputStream
-            try {
-                return Util.toByteArray(inputStream)
-            } finally {
-                Util.closeQuietly(inputStream)
-            }
-        } finally {
-            urlConnection?.disconnect()
-        }
-    }
-
-    private fun buildRtmp(): DataSource.Factory{
+    private fun buildRtmp(): DataSource.Factory {
         return RtmpDataSource.Factory()
     }
 
@@ -709,21 +596,25 @@ internal class BetterPlayer(
             )
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
+
             C.TYPE_DASH -> DashMediaSource.Factory(
                 DefaultDashChunkSource.Factory(mediaDataSourceFactory),
                 DefaultDataSource.Factory(context, mediaDataSourceFactory)
             )
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
+
             C.TYPE_HLS -> HlsMediaSource.Factory(mediaDataSourceFactory)
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
+
             C.TYPE_OTHER -> ProgressiveMediaSource.Factory(
                 mediaDataSourceFactory,
                 DefaultExtractorsFactory()
             )
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
+
             else -> {
                 throw IllegalStateException("Unsupported type: $type")
             }
@@ -732,6 +623,9 @@ internal class BetterPlayer(
         exoPlayer?.setMediaSource(mediaSource)
         exoPlayer?.setMediaItem(mediaItem)
         exoPlayer?.playWhenReady = true
+        exoPlayer?.let {
+            quanteecCore?.setPlayer(it);
+        }
     }
 
     private fun setupVideoPlayer(
@@ -768,6 +662,7 @@ internal class BetterPlayer(
                         event["event"] = "bufferingStart"
                         eventSink.success(event)
                     }
+
                     Player.STATE_READY -> {
                         if (!isInitialized) {
                             isInitialized = true
@@ -777,12 +672,14 @@ internal class BetterPlayer(
                         event["event"] = "bufferingEnd"
                         eventSink.success(event)
                     }
+
                     Player.STATE_ENDED -> {
                         val event: MutableMap<String, Any?> = HashMap()
                         event["event"] = "completed"
                         event["key"] = key
                         eventSink.success(event)
                     }
+
                     Player.STATE_IDLE -> {
                         //no-op
                     }
@@ -1064,6 +961,8 @@ internal class BetterPlayer(
         eventChannel.setStreamHandler(null)
         surface?.release()
         exoPlayer?.release()
+        quanteecCore?.release()
+        quanteecCore = null
     }
 
     override fun equals(other: Any?): Boolean {
