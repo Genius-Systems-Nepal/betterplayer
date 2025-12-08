@@ -344,7 +344,7 @@ class DataSource {
   final String? videoExtension;
 
   /// Key to compare DataSource
-  String get key {
+  String? get key {
     String? result = "";
 
     if (uri != null && uri!.isNotEmpty) {
@@ -359,7 +359,7 @@ class DataSource {
       result = "$result:$rawFormalHint";
     }
 
-    return result!;
+    return result;
   }
 
   @override

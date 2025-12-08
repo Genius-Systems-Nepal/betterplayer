@@ -1,5 +1,6 @@
-name: better_player_example
-description: Better Player example usage app.
+name: example
+description: "Example to showcase use cases of Better Player."
+publish_to: 'none'
 version: 1.0.0+1
 environment:
   sdk: '>=3.4.1 <4.0.0'
