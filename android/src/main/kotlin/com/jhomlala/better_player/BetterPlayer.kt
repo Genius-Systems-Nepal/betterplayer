@@ -45,10 +45,10 @@ import com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource
 import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
 import com.google.android.exoplayer2.trackselection.TrackSelectionOverrides
-import com.google.android.exoplayer2.ui.DefaultTrackNameProvider
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
 import com.google.android.exoplayer2.ui.PlayerNotificationManager.BitmapCallback
 import com.google.android.exoplayer2.ui.PlayerNotificationManager.MediaDescriptionAdapter
+import com.google.android.exoplayer2.ui.DefaultTrackNameProvider
 import com.google.android.exoplayer2.upstream.DataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
@@ -78,7 +78,6 @@ import com.quanteec.plugin.settings.QuanteecConfig
 import com.quanteec.quanteecexoplugin2_17.QuanteecBaseDataSource
 import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecBandwidthMeters
 import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecExoCore
-
 
 internal class BetterPlayer(
     context: Context,
@@ -270,7 +269,7 @@ internal class BetterPlayer(
         formatHint: String?,
         result: MethodChannel.Result,
         headers: Map<String, String>?,
-        useCache: Map<String, String>?,
+        useCache: Boolean?,
         maxCacheSize: Long,
         maxCacheFileSize: Long,
         overriddenDuration: Long,
@@ -550,11 +549,10 @@ internal class BetterPlayer(
         bitmap = null
     }
 
-
     private fun buildMediaSource(
         uri: Uri,
         adsUri: Uri?,
-        mediaDataSourceFactory: DataSource.Factory?,
+        mediaDataSourceFactory: DataSource.Factory,
         formatHint: String?,
         cacheKey: String?,
         context: Context
@@ -593,14 +591,14 @@ internal class BetterPlayer(
         }
         val mediaSource = when (type) {
             C.TYPE_SS -> SsMediaSource.Factory(
-                DefaultSsChunkSource.Factory(mediaDataSourceFactory!!),
+                DefaultSsChunkSource.Factory(mediaDataSourceFactory),
                 DefaultDataSource.Factory(context, mediaDataSourceFactory)
             )
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
                 .createMediaSource(mediaItem)
 
             C.TYPE_DASH -> DashMediaSource.Factory(
-                DefaultDashChunkSource.Factory(mediaDataSourceFactory!!),
+                DefaultDashChunkSource.Factory(mediaDataSourceFactory),
                 DefaultDataSource.Factory(context, mediaDataSourceFactory)
             )
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
@@ -611,7 +609,7 @@ internal class BetterPlayer(
                 .createMediaSource(mediaItem)
 
             C.TYPE_OTHER -> ProgressiveMediaSource.Factory(
-                mediaDataSourceFactory!!,
+                mediaDataSourceFactory,
                 DefaultExtractorsFactory()
             )
                 .setDrmSessionManagerProvider(drmSessionManagerProvider)
@@ -666,12 +664,10 @@ internal class BetterPlayer(
                     }
 
                     Player.STATE_READY -> {
-                            if (!isInitialized) {
-                                isInitialized = true
-                                sendInitialized()
-                            }
-
-
+                        if (!isInitialized) {
+                            isInitialized = true
+                            sendInitialized()
+                        }
                         val event: MutableMap<String, Any> = HashMap()
                         event["event"] = "bufferingEnd"
                         eventSink.success(event)

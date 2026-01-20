@@ -483,13 +483,6 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     return await _videoPlayerPlatform.contentPosition(_textureId);
   }
 
-  Future<void> playWhenReadyTrue() async {
-    return await _videoPlayerPlatform.playWhenReadyTrue(_textureId);
-  }
-
-  Future<void> playWhenReadyFalse() async {
-    return await _videoPlayerPlatform.playWhenReadyFalse(_textureId);
-  }
   /// Sets whether or not the video should loop after playing once. See also
   /// [VideoPlayerValue.isLooping].
   Future<void> setLooping(bool looping) async {
@@ -585,14 +578,11 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   ///
   /// If [moment] is outside of the video's full range it will be automatically
   /// and silently clamped.
-  Future<void> seekTo(Duration? position, {Duration? currentDuration}) async {
+  Future<void> seekTo(Duration? position) async {
     _timer?.cancel();
     bool isPlaying = value.isPlaying;
     final int positionInMs = value.position.inMilliseconds;
-    // final int durationInMs = value.duration?.inMilliseconds ?? 0;
-    /// Get content duration to check the total duration while playing DVR for seek problem
-    final int durationInMs = currentDuration != null ? currentDuration.inMilliseconds : value.duration?.inMilliseconds  ?? 0;
-
+    final int durationInMs = value.duration?.inMilliseconds ?? 0;
 
     if (positionInMs >= durationInMs && position?.inMilliseconds == 0) {
       isPlaying = true;
@@ -602,9 +592,9 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     }
 
     Duration? positionToSeek = position;
-    if ((position?.inMilliseconds ?? 0) > durationInMs) {
+    if (position! > value.duration!) {
       positionToSeek = value.duration;
-    } else if (position! < const Duration()) {
+    } else if (position < const Duration()) {
       positionToSeek = const Duration();
     }
     _seekPosition = positionToSeek;
