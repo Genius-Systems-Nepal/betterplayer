@@ -67,7 +67,7 @@ abstract class VideoPlayerPlatform {
 
   /// Creates an instance of a video player and returns its textureId.
   Future<int?> create(
-      {BetterPlayerBufferingConfiguration? bufferingConfiguration}) {
+      {BetterPlayerBufferingConfiguration? bufferingConfiguration, Map<String, dynamic>? quanteecConfig}) {
     throw UnimplementedError('create() has not been implemented.');
   }
 
@@ -104,39 +104,6 @@ abstract class VideoPlayerPlatform {
   /// Stops the video playback.
   Future<void> pause(int? textureId) {
     throw UnimplementedError('pause() has not been implemented.');
-  }
-
-  ///Remove ad views
-  Future<void> disposeAdView(int? textureId) {
-    throw UnimplementedError('disposeAdView() has not been implemented.');
-  }
-
-  ///is Ad playing
-  Future<bool?> isAdPlaying(int? textureId) {
-    throw UnimplementedError('disposeAdView() has not been implemented.');
-  }
-
-  Future<Duration?> contentDuration(int? textureId) {
-    throw UnimplementedError('disposeAdView() has not been implemented.');
-  }
-
-  Future<Duration?> contentPosition(int? textureId) {
-    throw UnimplementedError('disposeAdView() has not been implemented.');
-  }
-
-  ///nerdstat
-  Future<void> startNerdStat(int? textureId) {
-    throw UnimplementedError('startNerdStat() has not been implemented.');
-  }
-
-  ///playWhenReadyTrue
-  Future<void> playWhenReadyTrue(int? textureId) {
-    throw UnimplementedError('playWhenReadyTrue() has not been implemented.');
-  }
-
-  ///playWhenReadyFalse
-  Future<void> playWhenReadyFalse(int? textureId) {
-    throw UnimplementedError('playWhenReadyFalse() has not been implemented.');
   }
 
   /// Sets the volume to a range between 0.0 and 1.0.
@@ -186,6 +153,33 @@ abstract class VideoPlayerPlatform {
   Future<bool?> isPictureInPictureEnabled(int? textureId) {
     throw UnimplementedError(
         'isPictureInPictureEnabled() has not been implemented.');
+  }
+
+  Future<bool?> checkPipPermission(int? textureId) {
+    throw UnimplementedError('checkPipPermission() has not been implemented.');
+  }
+
+  Future<void> openPipPermissionSettings(int? textureId) {
+    throw UnimplementedError(
+        'openPipPermissionSettings() has not been implemented.');
+  }
+
+  ///Remove ad views
+  Future<void> disposeAdView(int? textureId) {
+    throw UnimplementedError('disposeAdView() has not been implemented.');
+  }
+
+  ///is Ad playing
+  Future<bool?> isAdPlaying(int? textureId) {
+    throw UnimplementedError('disposeAdView() has not been implemented.');
+  }
+
+  Future<Duration?> contentDuration(int? textureId) {
+    throw UnimplementedError('contentDuration() has not been implemented.');
+  }
+
+  Future<Duration?> contentPosition(int? textureId) {
+    throw UnimplementedError('contentPosition() has not been implemented.');
   }
 
   Future<void> setAudioTrack(int? textureId, String? name, int? index) {
@@ -263,6 +257,7 @@ class DataSource {
     this.licenseUrl,
     this.certificateUrl,
     this.drmHeaders,
+    this.extraParams,
     this.activityName,
     this.clearKey,
     this.videoExtension,
@@ -340,6 +335,8 @@ class DataSource {
 
   final Map<String, String>? drmHeaders;
 
+  final Map<String, String>? extraParams;
+
   final String? activityName;
 
   final String? clearKey;
@@ -347,7 +344,7 @@ class DataSource {
   final String? videoExtension;
 
   /// Key to compare DataSource
-  String get key {
+  String? get key {
     String? result = "";
 
     if (uri != null && uri!.isNotEmpty) {
@@ -362,7 +359,7 @@ class DataSource {
       result = "$result:$rawFormalHint";
     }
 
-    return result!;
+    return result;
   }
 
   @override
@@ -421,6 +418,7 @@ class VideoEvent {
     this.buffered,
     this.position,
     this.nerdStat,
+    this.bitrateUpdate = 0
   });
 
   /// The type of the event.
@@ -451,6 +449,9 @@ class VideoEvent {
 
   ///Nerdstat
   final dynamic nerdStat;
+
+  ///bitrate
+  final int bitrateUpdate;
 
   @override
   bool operator ==(Object other) {
@@ -515,6 +516,7 @@ enum VideoEventType {
 
   adStarted,
   adEnded,
+  bitrateUpdate
 }
 
 /// Describes a discrete segment of time within a video using a [start] and

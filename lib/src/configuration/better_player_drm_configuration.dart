@@ -20,11 +20,15 @@ class BetterPlayerDrmConfiguration {
   ///Additional headers send with auth request, used only for WIDEVINE DRM
   final Map<String, String>? headers;
 
+  ///Extra parameters
+  final Map<String, String>? extraParams;
+
   BetterPlayerDrmConfiguration(
       {this.drmType,
       this.token,
       this.licenseUrl,
       this.certificateUrl,
       this.headers,
-      this.clearKey});
+      this.clearKey,
+      this.extraParams});
 }

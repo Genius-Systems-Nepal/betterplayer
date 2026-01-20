@@ -28,4 +28,5 @@ enum BetterPlayerEventType {
   nerdStat,
   adStarted,
   adEnded,
+  bitrateUpdate
 }

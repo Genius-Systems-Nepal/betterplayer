@@ -269,10 +269,8 @@ class _BetterPlayerVideoFitWidgetState
         }
 
         if (_initialized != controller?.value.initialized) {
-          if(controller?.value.initialized != null){
-            _initialized = controller!.value.initialized;
-            setState(() {});
-          }
+          _initialized = controller?.value.initialized ?? false;
+          setState(() {});
         }
       };
       controller!.addListener(_initializedListener!);

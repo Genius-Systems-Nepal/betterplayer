@@ -61,6 +61,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   @override
   Future<int?> create({
     BetterPlayerBufferingConfiguration? bufferingConfiguration,
+    Map<String, dynamic>? quanteecConfig
   }) async {
     late final Map<String, dynamic>? response;
     if (bufferingConfiguration == null) {
@@ -74,6 +75,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'bufferForPlaybackMs': bufferingConfiguration.bufferForPlaybackMs,
           'bufferForPlaybackAfterRebufferMs':
               bufferingConfiguration.bufferForPlaybackAfterRebufferMs,
+          'quanteecConfig': quanteecConfig
         },
       );
 
@@ -125,6 +127,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'licenseUrl': dataSource.licenseUrl,
           'certificateUrl': dataSource.certificateUrl,
           'drmHeaders': dataSource.drmHeaders,
+          'extraParams': dataSource.extraParams,
           'activityName': dataSource.activityName,
           'clearKey': dataSource.clearKey,
           'videoExtension': dataSource.videoExtension,
@@ -322,6 +325,22 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
+  Future<bool?> checkPipPermission(int? textureId) {
+    return _channel.invokeMethod<bool>(
+      'checkPictureInPicturePermission',
+      <String, dynamic>{'textureId': textureId},
+    );
+  }
+
+  @override
+  Future<void> openPipPermissionSettings(int? textureId) {
+    return _channel.invokeMethod<bool>(
+      'openPictureInPicturePermissionSettings',
+      <String, dynamic>{'textureId': textureId},
+    );
+  }
+
+  @override
   Future<void> disablePictureInPicture(int? textureId) {
     return _channel.invokeMethod<bool>(
       'disablePictureInPicture',
@@ -489,6 +508,13 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
               eventType: VideoEventType.nerdStat,
               key: key,
               nerdStat: values);
+
+        case 'bitrateUpdate':
+          dynamic values = map["values"];
+          return VideoEvent(
+              eventType: VideoEventType.bitrateUpdate,
+              key: key,
+              bitrateUpdate: values);
 
         case 'adStarted':
           return VideoEvent(eventType: VideoEventType.adStarted, key: key);

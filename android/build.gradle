@@ -7,19 +7,12 @@ buildscript {
     ext.annotationVersion = "1.2.0"
     ext.workVersion = "2.7.0"
     ext.coreVersion = "1.6.0"
-    ext.gradleVersion = "4.2.0"
-    ext.kotlinVersion = "1.4.0"
-
-    dependencies {
-        classpath "com.android.tools.build:gradle:$gradleVersion"
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
-
-    }
+    ext.gradleVersion = "7.0.2"
+    ext.kotlinVersion = "1.5.31"
 
     repositories {
         google()
         mavenCentral()
-        jcenter()
     }
 
     dependencies {
@@ -28,11 +21,31 @@ buildscript {
     }
 }
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def quanteecUsername = localProperties.getProperty("quanteecUsername") ?: ""
+def quanteecPassword = localProperties.getProperty("quanteecPassword") ?: ""
+
 rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
-        jcenter()
+        maven {
+            url 'https://maven.quanteec.com/repository/internal/'
+            credentials {
+                username = quanteecUsername
+                password = quanteecPassword
+            }
+            authentication {
+                basic(BasicAuthentication)
+            }
+        }
     }
 }
 
@@ -40,15 +53,17 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
-    compileSdkVersion 31
+    compileSdkVersion 34
+
+    namespace "com.jhomlala.better_player"
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '17'
     }
 
     sourceSets {
@@ -56,7 +71,7 @@ android {
     }
 
     defaultConfig {
-        minSdkVersion 16
+        minSdkVersion 21
     }
 
     dependencies {
@@ -73,11 +88,12 @@ android {
         implementation "androidx.work:work-runtime:$workVersion"
         implementation "com.google.android.exoplayer:extension-ima:$exoPlayerVersion"
         implementation "com.google.android.exoplayer:extension-rtmp:$exoPlayerVersion"
+
+        implementation "com.quanteec:quanteecExoPlugin2_17:1.7.5"
+        implementation "com.quanteec:quanteecPlugin:1.7.5"
     }
 }
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion"
 }
-
-
