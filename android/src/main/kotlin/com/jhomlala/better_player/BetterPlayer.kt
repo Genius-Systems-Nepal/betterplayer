@@ -961,7 +961,7 @@ internal class BetterPlayer(
         eventChannel.setStreamHandler(null)
         surface?.release()
         exoPlayer?.release()
-        quanteecCore?.release()
+//        quanteecCore?.release()
         quanteecCore = null
     }
 
