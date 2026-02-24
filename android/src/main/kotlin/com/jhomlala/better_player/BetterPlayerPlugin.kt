@@ -119,9 +119,10 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                         call.argument(BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS)
                     )
                 }
+                val quanteecConfigData: Map<String, Any?>? = call.argument<Map<String, Any?>?>("quanteecConfig")
                 val player = BetterPlayer(
                     flutterState?.applicationContext!!, eventChannel, handle,
-                    customDefaultLoadControl, result, activity!!
+                    customDefaultLoadControl, result, activity!!, quanteecConfigData
                 )
                 videoPlayers.put(handle.id(), player)
             }

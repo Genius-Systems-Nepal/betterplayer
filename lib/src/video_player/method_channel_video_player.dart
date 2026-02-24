@@ -41,6 +41,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   @override
   Future<int?> create({
     BetterPlayerBufferingConfiguration? bufferingConfiguration,
+    Map<String, dynamic>? quanteecConfig
   }) async {
     late final Map<String, dynamic>? response;
     if (bufferingConfiguration == null) {
@@ -54,6 +55,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'bufferForPlaybackMs': bufferingConfiguration.bufferForPlaybackMs,
           'bufferForPlaybackAfterRebufferMs':
               bufferingConfiguration.bufferForPlaybackAfterRebufferMs,
+          'quanteecConfig': quanteecConfig
         },
       );
 

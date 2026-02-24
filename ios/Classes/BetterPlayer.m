@@ -26,13 +26,18 @@ AVPictureInPictureController *_pipController;
     double lastBitRate;
 }
 
-- (instancetype)initWithFrame:(CGRect)frame {
+- (instancetype)initWithFrame:(CGRect)frame dictQuanteecConfig:(NSDictionary * _Nullable)dictQuanteecConfig {
     self = [super init];
     NSAssert(self, @"super init cannot be nil");
     _isInitialized = false;
     _isPlaying = false;
     _disposed = false;
     _player = [[AVPlayer alloc] init];
+    
+    //TODO: handle quanteec when package available
+    /*if (dictQuanteecConfig) {
+        [QuanteecHelper setupWithPlayer:_player dictQuanteecConfig: dictQuanteecConfig];
+    }*/
     
     BetterPlayerView *playerView = [[BetterPlayerView alloc] initWithFrame:CGRectZero];
     playerView.player = _player;
