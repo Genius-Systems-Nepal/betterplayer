@@ -266,12 +266,18 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   @override
   Future<DateTime?> getAbsolutePosition(int? textureId) async {
     final int milliseconds = await _channel.invokeMethod<int>(
-          'absolutePosition',
-          <String, dynamic>{'textureId': textureId},
-        ) ??
+      'absolutePosition',
+      <String, dynamic>{'textureId': textureId},
+    ) ??
         0;
 
     if (milliseconds <= 0) return null;
+
+    const int maxEpoch = 8640000000000000;
+
+    if (milliseconds.abs() > maxEpoch) {
+      return null;
+    }
 
     return DateTime.fromMillisecondsSinceEpoch(milliseconds);
   }

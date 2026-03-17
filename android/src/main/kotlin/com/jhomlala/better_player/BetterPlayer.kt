@@ -163,8 +163,11 @@ internal class BetterPlayer(
             }
 
         if (quanteecConfigData != null) {
+            /// Need to reelase quanteec before creating new instance
+            releaseQuanteec()
+
             val videoId = quanteecConfigData?.get("videoId") as? String ?: ""
-            val quanteecKey = quanteecConfigData?.get("qunateecKey") as? String ?: ""
+            val quanteecKey = quanteecConfigData?.get("quanteecKey") as? String ?: ""
 
             quanteecConfig = QuanteecConfig.Builder(quanteecKey).setVideoID(videoId).build()
             quanteecCore = QuanteecExoCore(context, quanteecConfig!!)
@@ -952,6 +955,7 @@ internal class BetterPlayer(
     }
 
     fun dispose() {
+        releaseQuanteec()
         disposeMediaSession()
         disposeRemoteNotifications()
         if (isInitialized) {
@@ -961,8 +965,13 @@ internal class BetterPlayer(
         eventChannel.setStreamHandler(null)
         surface?.release()
         exoPlayer?.release()
-        quanteecCore?.release()
-        quanteecCore = null
+    }
+
+    fun releaseQuanteec() {
+        try {
+            quanteecCore?.release()
+            quanteecCore = null
+        } catch (_: Exception) {}
     }
 
     override fun equals(other: Any?): Boolean {
