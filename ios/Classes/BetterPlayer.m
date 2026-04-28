@@ -12,6 +12,28 @@ static void* playbackBufferEmptyContext = &playbackBufferEmptyContext;
 static void* playbackBufferFullContext = &playbackBufferFullContext;
 static void* presentationSizeContext = &presentationSizeContext;
 
+static NSString* BetterPlayerNormalizeDrmToken(NSString* token) {
+    if (![token isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+    NSString* normalizedToken = [token stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (normalizedToken.length == 0) {
+        return nil;
+    }
+    if ([normalizedToken caseInsensitiveCompare:@"null"] == NSOrderedSame) {
+        return nil;
+    }
+    return normalizedToken;
+}
+
+static NSString* BetterPlayerNormalizeNonEmptyString(NSString* value) {
+    if (![value isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+    NSString* normalizedValue = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return normalizedValue.length > 0 ? normalizedValue : nil;
+}
+
 
 #if TARGET_OS_IOS
 void (^__strong _Nonnull _restoreUserInterfaceForPIPStopCompletionHandler)(BOOL);
@@ -278,16 +300,19 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     } else {
         AVURLAsset* asset = [AVURLAsset URLAssetWithURL:url
                                                 options:@{@"AVURLAssetHTTPHeaderFieldsKey" : headers}];
-        //if drmToken is passed, it is vu drm, else fallback to ez drm
-        if ((drmToken != (id)[NSNull null]) && ([drmToken length] > 0) && (certificateUrl != (id)[NSNull null])) {
-            NSURL * licenseNSURL = [[NSURL alloc] initWithString: licenseUrl];
-            _vuDrmAssetsloaderDelegate = [[BetterPlayerVuDrmAssetsLoaderDelegate alloc]initWithCertificateURL:certificateUrl licenseURL:licenseNSURL fairPlayToken:drmToken];
+        NSString* normalizedDrmToken = BetterPlayerNormalizeDrmToken(drmToken);
+        NSString* normalizedCertificateUrl = BetterPlayerNormalizeNonEmptyString(certificateUrl);
+        NSString* normalizedLicenseUrl = BetterPlayerNormalizeNonEmptyString(licenseUrl);
+        // If token is valid, use VuDRM, otherwise keep EzDRM fallback path.
+        if (normalizedDrmToken != nil && normalizedCertificateUrl != nil && normalizedLicenseUrl != nil) {
+            NSURL * licenseNSURL = [[NSURL alloc] initWithString: normalizedLicenseUrl];
+            _vuDrmAssetsloaderDelegate = [[BetterPlayerVuDrmAssetsLoaderDelegate alloc]initWithCertificateURL:normalizedCertificateUrl licenseURL:licenseNSURL fairPlayToken:normalizedDrmToken];
             dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_DEFAULT, -1);
             dispatch_queue_t streamQueue = dispatch_queue_create("streamQueue", qos);
             [asset.resourceLoader setDelegate:_vuDrmAssetsloaderDelegate queue:streamQueue];
-        } else if (certificateUrl && certificateUrl != [NSNull null] && [certificateUrl length] > 0) {
-            NSURL * certificateNSURL = [[NSURL alloc] initWithString: certificateUrl];
-            NSURL * licenseNSURL = [[NSURL alloc] initWithString: licenseUrl];
+        } else if (normalizedCertificateUrl != nil && normalizedLicenseUrl != nil) {
+            NSURL * certificateNSURL = [[NSURL alloc] initWithString: normalizedCertificateUrl];
+            NSURL * licenseNSURL = [[NSURL alloc] initWithString: normalizedLicenseUrl];
             _loaderDelegate = [[BetterPlayerEzDrmAssetsLoaderDelegate alloc] init:certificateNSURL withLicenseURL:licenseNSURL];
             dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_DEFAULT, -1);
             dispatch_queue_t streamQueue = dispatch_queue_create("streamQueue", qos);

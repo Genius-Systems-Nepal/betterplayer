@@ -14,12 +14,21 @@ import Alamofire
         self.fairPlayToken = fairPlayToken
         super.init()
     }
+
+    private var normalizedFairPlayToken: String? {
+        guard let token = fairPlayToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty,
+              token.caseInsensitiveCompare("null") != .orderedSame else {
+            return nil
+        }
+        return token
+    }
     
     public func resourceLoader(_ resourceLoader: AVAssetResourceLoader, shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest) -> Bool {
         
         let url = self.certificateURL ?? ""
         var headers: HTTPHeaders = [:]
-        if let token = self.fairPlayToken, !token.isEmpty {
+        if let token = self.normalizedFairPlayToken {
             headers["x-vudrm-token"] = token
             headers["nv-authorizations"] = token
         }
@@ -67,7 +76,7 @@ import Alamofire
             urlRequest.httpMethod = "POST"
             urlRequest.httpBody = spcData
             urlRequest.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-            if let token = self.fairPlayToken, !token.isEmpty {
+            if let token = self.normalizedFairPlayToken {
                 urlRequest.setValue(token, forHTTPHeaderField: "nv-authorizations")
                 urlRequest.setValue(token, forHTTPHeaderField: "x-vudrm-token")
                 urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

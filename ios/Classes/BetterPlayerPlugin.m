@@ -19,6 +19,20 @@ int texturesCount = -1;
 BetterPlayer* _notificationPlayer;
 bool _remoteCommandsInitialized = false;
 
+- (NSString *)normalizedDrmTokenFromValue:(id)rawToken {
+    if (![rawToken isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+    NSString *normalizedToken = [(NSString *)rawToken stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (normalizedToken.length == 0) {
+        return nil;
+    }
+    if ([normalizedToken caseInsensitiveCompare:@"null"] == NSOrderedSame) {
+        return nil;
+    }
+    return normalizedToken;
+}
+
 
 #pragma mark - FlutterPlugin protocol
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
@@ -326,12 +340,11 @@ bool _remoteCommandsInitialized = false;
             NSString* videoExtension = dataSource[@"videoExtension"];
             NSString* adsUrl = dataSource[@"ads_url"];
             
-            NSString *drmToken;
-            if ([dataSource objectForKey:@"extraParams"] != [NSNull null]) {
-                NSDictionary *extraParams = dataSource[@"extraParams"];
-                if ([extraParams objectForKey:@"drm_token"] != [NSNull null]) {
-                    drmToken = extraParams[@"drm_token"];
-                }
+            NSString *drmToken = nil;
+            id extraParamsObject = dataSource[@"extraParams"];
+            if ([extraParamsObject isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *extraParams = (NSDictionary *)extraParamsObject;
+                drmToken = [self normalizedDrmTokenFromValue:extraParams[@"drm_token"]];
             }
             
             int overriddenDuration = 0;
