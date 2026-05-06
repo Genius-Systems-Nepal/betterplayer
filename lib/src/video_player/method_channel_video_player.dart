@@ -207,6 +207,26 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
+  Future<Duration> contentDuration(int? textureId) async {
+    return Duration(
+        milliseconds: await _channel.invokeMethod<int>(
+              'contentDuration',
+              <String, dynamic>{'textureId': textureId},
+            ) ??
+            -1);
+  }
+
+  @override
+  Future<Duration> contentPosition(int? textureId) async {
+    return Duration(
+        milliseconds: await _channel.invokeMethod<int>(
+              'contentPosition',
+              <String, dynamic>{'textureId': textureId},
+            ) ??
+            -1);
+  }
+
+  @override
   Future<void> setVolume(int? textureId, double volume) {
     return _channel.invokeMethod<void>(
       'setVolume',
@@ -264,42 +284,18 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<Duration> contentDuration(int? textureId) async{
-    return Duration(
-        milliseconds: await _channel.invokeMethod<int>(
-          'contentDuration',
-          <String, dynamic>{'textureId': textureId},
-        ) ??
-            -1);
-
-  }
-
-  @override
-  Future<Duration> contentPosition(int? textureId) async{
-    return Duration(
-        milliseconds: await _channel.invokeMethod<int>(
-          'contentPosition',
-          <String, dynamic>{'textureId': textureId},
-        ) ??
-            -1);
-
-  }
-
-
-  @override
   Future<DateTime?> getAbsolutePosition(int? textureId) async {
     final int milliseconds = await _channel.invokeMethod<int>(
-          'absolutePosition',
-          <String, dynamic>{'textureId': textureId},
-        ) ??
+      'absolutePosition',
+      <String, dynamic>{'textureId': textureId},
+    ) ??
         0;
 
     if (milliseconds <= 0) return null;
 
-    const int minMillis = -8640000000000000;
-    const int maxMillis = 8640000000000000;
+    const int maxEpoch = 8640000000000000;
 
-    if (milliseconds < minMillis || milliseconds > maxMillis) {
+    if (milliseconds.abs() > maxEpoch) {
       return null;
     }
 

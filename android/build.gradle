@@ -89,8 +89,8 @@ android {
         implementation "com.google.android.exoplayer:extension-ima:$exoPlayerVersion"
         implementation "com.google.android.exoplayer:extension-rtmp:$exoPlayerVersion"
 
-        implementation "com.quanteec:quanteecExoPlugin2_17:1.7.5"
-        implementation "com.quanteec:quanteecPlugin:1.7.5"
+        implementation "com.quanteec:quanteecExoPlugin2_17:1.8.18"
+        implementation "com.quanteec:quanteecPlugin:1.8.18"
     }
 }
 
