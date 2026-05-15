@@ -111,31 +111,17 @@ class DrmHelper {
             urlConnection.requestMethod = "POST"
             urlConnection.doOutput = true
             urlConnection.doInput = true
-            urlConnection.setRequestProperty("Content-Type", "application/json")
+            urlConnection.setRequestProperty("Content-Type", "application/octet-stream")
             urlConnection.connectTimeout = 30000
             urlConnection.readTimeout = 30000
 
-            val json = JSONObject()
-            try {
-                val jsonArray = JSONArray()
-                val bitmask = 0x000000FF
-                for (aData in data!!) {
-                    val `val` = aData.toInt()
-                    jsonArray.put(bitmask and `val`)
-                }
-
-                json.put("token", requestProperties["token"])
-                json.put("drm_info", jsonArray)
-                json.put("kid", requestProperties["kid"])
-            } catch (e: JSONException) {
-                e.printStackTrace()
+            requestProperties["token"]?.let {
+                urlConnection.setRequestProperty("nv-authorizations", it)
             }
 
-            data = json.toString().toByteArray(StandardCharsets.UTF_8)
-
             val out = urlConnection.outputStream
-            out.use {
-                it.write(data)
+            out.use { out ->
+                out.write(data)
             }
 
             val responseCode = urlConnection.responseCode
