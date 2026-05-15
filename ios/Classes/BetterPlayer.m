@@ -33,27 +33,28 @@ AVPictureInPictureController *_pipController;
     _isPlaying = false;
     _disposed = false;
     _player = [[AVPlayer alloc] init];
-    
+
     //TODO: handle quanteec when package available
     /*if (dictQuanteecConfig) {
         [QuanteecHelper setupWithPlayer:_player dictQuanteecConfig: dictQuanteecConfig];
     }*/
-    
+
     BetterPlayerView *playerView = [[BetterPlayerView alloc] initWithFrame:CGRectZero];
     playerView.player = _player;
     _thisView = playerView;
-    
+
     [self setUpAdsLoader];
 //    _adTagUrlOrAdsResponse = @"https://ap-south-1-prod.ads.expresswifi.com/ads/video?h=720&w=600&api_key=BHPGAIUBVG4QIJIA&apid=3412547012154583&tag=app-10001-0002&skip=5";
     _isAdTagUrl = TRUE;
     _contentPlayhead = [[IMAAVPlayerContentPlayhead alloc] initWithAVPlayer:_player];
 //    [self requestAds];
-    
+
     _player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
     ///Fix for loading large videos
     if (@available(iOS 10.0, *)) {
         _player.automaticallyWaitsToMinimizeStalling = false;
     }
+
     self._observersAdded = false;
     return self;
 }

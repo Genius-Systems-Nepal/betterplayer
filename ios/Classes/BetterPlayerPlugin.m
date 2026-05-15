@@ -291,7 +291,7 @@ bool _remoteCommandsInitialized = false;
     } else if ([@"create" isEqualToString:call.method]) {
 
         NSDictionary *argsMap = (NSDictionary *)call.arguments;
-        
+
         // In case of quanteec config dictionary is passed
         NSDictionary * _Nullable dictQuanteecConfig;
         if (argsMap[@"quanteecConfig"] != [NSNull null] && [argsMap[@"quanteecConfig"] isKindOfClass:[NSDictionary class]]) {
@@ -325,7 +325,7 @@ bool _remoteCommandsInitialized = false;
             NSNumber* maxCacheSize = dataSource[@"maxCacheSize"];
             NSString* videoExtension = dataSource[@"videoExtension"];
             NSString* adsUrl = dataSource[@"ads_url"];
-            
+
             NSString *drmToken;
             if ([dataSource objectForKey:@"extraParams"] != [NSNull null]) {
                 NSDictionary *extraParams = dataSource[@"extraParams"];
@@ -333,7 +333,7 @@ bool _remoteCommandsInitialized = false;
                     drmToken = extraParams[@"drm_token"];
                 }
             }
-            
+
             int overriddenDuration = 0;
             if ([dataSource objectForKey:@"overriddenDuration"] != [NSNull null]){
                 overriddenDuration = [dataSource[@"overriddenDuration"] intValue];
