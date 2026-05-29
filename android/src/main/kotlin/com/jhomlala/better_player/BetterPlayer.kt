@@ -272,7 +272,7 @@ internal class BetterPlayer(
         formatHint: String?,
         result: MethodChannel.Result,
         headers: Map<String, String>?,
-        useCache: Boolean,
+        useCache: Boolean?,
         maxCacheSize: Long,
         maxCacheFileSize: Long,
         overriddenDuration: Long,

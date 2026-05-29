@@ -912,7 +912,8 @@ class BetterPlayerController {
     final position = await videoPlayerController!.position;
     final wasPlayingBeforeChange = isPlaying()!;
     pause();
-    await setupDataSource(betterPlayerDataSource!.copyWith(url: url, adsUrl: adsUrl));
+    await setupDataSource(
+        betterPlayerDataSource!.copyWith(url: url, adsUrl: adsUrl));
     seekTo(position!);
     if (wasPlayingBeforeChange) {
       play();
@@ -1080,6 +1081,9 @@ class BetterPlayerController {
   ///Handle VideoEvent when remote controls notification / PiP is shown
   void _handleVideoEvent(VideoEvent event) async {
     switch (event.eventType) {
+      case VideoEventType.initialized:
+        _postEvent(BetterPlayerEvent(BetterPlayerEventType.initialized));
+        break;
       case VideoEventType.play:
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.play));
         break;
@@ -1096,7 +1100,7 @@ class BetterPlayerController {
             BetterPlayerEventType.finished,
             parameters: <String, dynamic>{
               _progressParameter: videoValue?.position,
-              _durationParameter: videoValue?.duration
+              _durationParameter: videoValue?.duration,
             },
           ),
         );
