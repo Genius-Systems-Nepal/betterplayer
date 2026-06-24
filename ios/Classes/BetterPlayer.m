@@ -34,6 +34,24 @@ static NSString* BetterPlayerNormalizeNonEmptyString(NSString* value) {
     return normalizedValue.length > 0 ? normalizedValue : nil;
 }
 
+static BOOL BetterPlayerIsRemoteCertificateUrl(NSString* certificateUrl) {
+    NSString* lowerCertificateUrl = [certificateUrl lowercaseString];
+    return [lowerCertificateUrl hasPrefix:@"http://"] || [lowerCertificateUrl hasPrefix:@"https://"];
+}
+
+static NSString* BetterPlayerCertificateUrlPreview(NSString* certificateUrl) {
+    if (certificateUrl.length == 0) {
+        return @"(empty)";
+    }
+    if (BetterPlayerIsRemoteCertificateUrl(certificateUrl)) {
+        return certificateUrl;
+    }
+    const NSUInteger previewLength = MIN((NSUInteger)32, certificateUrl.length);
+    return [NSString stringWithFormat:@"%@... (%lu chars, inline base64)",
+            [certificateUrl substringToIndex:previewLength],
+            (unsigned long)certificateUrl.length];
+}
+
 
 #if TARGET_OS_IOS
 void (^__strong _Nonnull _restoreUserInterfaceForPIPStopCompletionHandler)(BOOL);
@@ -304,14 +322,26 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         NSString* normalizedDrmToken = BetterPlayerNormalizeDrmToken(drmToken);
         NSString* normalizedCertificateUrl = BetterPlayerNormalizeNonEmptyString(certificateUrl);
         NSString* normalizedLicenseUrl = BetterPlayerNormalizeNonEmptyString(licenseUrl);
-        // If token is valid, use VuDRM, otherwise keep EzDRM fallback path.
-        if (normalizedDrmToken != nil && normalizedCertificateUrl != nil && normalizedLicenseUrl != nil) {
+        // VuDRM handles token-based providers (e.g. Lionsgate) and inline-certificate providers (e.g. SonyLiv ExpressPlay).
+        if (normalizedCertificateUrl != nil && normalizedLicenseUrl != nil &&
+            (normalizedDrmToken != nil || !BetterPlayerIsRemoteCertificateUrl(normalizedCertificateUrl))) {
+            BOOL isInlineCertificate = !BetterPlayerIsRemoteCertificateUrl(normalizedCertificateUrl);
+            NSLog(@"[BetterPlayer-FairPlay] Using VuDRM delegate (inlineCertificate=%@, hasToken=%@)",
+                  isInlineCertificate ? @"YES" : @"NO",
+                  normalizedDrmToken != nil ? @"YES" : @"NO");
+            NSLog(@"[BetterPlayer-FairPlay] certificateUrl=%@",
+                  BetterPlayerCertificateUrlPreview(normalizedCertificateUrl));
+            NSLog(@"[BetterPlayer-FairPlay] licenseUrl=%@", normalizedLicenseUrl);
             NSURL * licenseNSURL = [[NSURL alloc] initWithString: normalizedLicenseUrl];
             _vuDrmAssetsloaderDelegate = [[BetterPlayerVuDrmAssetsLoaderDelegate alloc]initWithCertificateURL:normalizedCertificateUrl licenseURL:licenseNSURL fairPlayToken:normalizedDrmToken];
             dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_DEFAULT, -1);
             dispatch_queue_t streamQueue = dispatch_queue_create("streamQueue", qos);
             [asset.resourceLoader setDelegate:_vuDrmAssetsloaderDelegate queue:streamQueue];
         } else if (normalizedCertificateUrl != nil && normalizedLicenseUrl != nil) {
+            NSLog(@"[BetterPlayer-FairPlay] Using EzDRM delegate");
+            NSLog(@"[BetterPlayer-FairPlay] certificateUrl=%@",
+                  BetterPlayerCertificateUrlPreview(normalizedCertificateUrl));
+            NSLog(@"[BetterPlayer-FairPlay] licenseUrl=%@", normalizedLicenseUrl);
             NSURL * certificateNSURL = [[NSURL alloc] initWithString: normalizedCertificateUrl];
             NSURL * licenseNSURL = [[NSURL alloc] initWithString: normalizedLicenseUrl];
             _loaderDelegate = [[BetterPlayerEzDrmAssetsLoaderDelegate alloc] init:certificateNSURL withLicenseURL:licenseNSURL];
