@@ -455,7 +455,9 @@ class BetterPlayerController {
             notificationChannelName: _betterPlayerDataSource?.notificationConfiguration?.notificationChannelName,
             overriddenDuration: _betterPlayerDataSource!.overriddenDuration,
             activityName: _betterPlayerDataSource?.notificationConfiguration?.activityName,
-            clearKey: _betterPlayerDataSource?.drmConfiguration?.clearKey);
+            clearKey: _betterPlayerDataSource?.drmConfiguration?.clearKey,
+            formatHint: _getVideoFormat(_betterPlayerDataSource!.videoFormat),
+            videoExtension: _betterPlayerDataSource!.videoExtension);
         break;
       case BetterPlayerDataSourceType.memory:
         final file =

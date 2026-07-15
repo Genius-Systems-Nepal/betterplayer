@@ -375,7 +375,22 @@ bool _remoteCommandsInitialized = false;
                 }
                 [player setDataSourceAsset:assetPath withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration withDrmToken:drmToken];
             } else if (uriArg) {
-                [player setDataSourceURL:[NSURL URLWithString:uriArg] withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl withHeaders:headers withCache: useCache cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration videoExtension: videoExtension adsUrl: adsUrl withDrmToken:drmToken];
+                NSURL* dataUrl = nil;
+                if ([uriArg hasPrefix:@"file:"]) {
+                    dataUrl = [NSURL URLWithString:uriArg];
+                    if (dataUrl == nil || dataUrl.path.length == 0) {
+                        // Fallback for poorly encoded file URIs with spaces.
+                        NSString* path = [uriArg hasPrefix:@"file://"]
+                            ? [uriArg substringFromIndex:7]
+                            : uriArg;
+                        dataUrl = [NSURL fileURLWithPath:path];
+                    }
+                } else if ([uriArg hasPrefix:@"/"] ) {
+                    dataUrl = [NSURL fileURLWithPath:uriArg];
+                } else {
+                    dataUrl = [NSURL URLWithString:uriArg];
+                }
+                [player setDataSourceURL:dataUrl withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl withHeaders:headers withCache: useCache cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration videoExtension: videoExtension adsUrl: adsUrl withDrmToken:drmToken];
             } else {
                 result(FlutterMethodNotImplemented);
             }

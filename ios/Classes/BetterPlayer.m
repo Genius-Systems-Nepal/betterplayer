@@ -366,6 +366,22 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     [_player replaceCurrentItemWithPlayerItem:item];
 
     AVAsset* asset = [item asset];
+    NSURL* assetURL = nil;
+    if ([asset isKindOfClass:[AVURLAsset class]]) {
+        assetURL = ((AVURLAsset*)asset).URL;
+    }
+    BOOL isHls = NO;
+    if (assetURL != nil) {
+        NSString* pathExt = assetURL.pathExtension.lowercaseString;
+        NSString* abs = assetURL.absoluteString.lowercaseString;
+        isHls = [pathExt isEqualToString:@"m3u8"] || [abs containsString:@".m3u8"];
+    }
+    // Video composition is unsupported for HLS (local or remote) and breaks AVPlayer.
+    if (isHls) {
+        [self addObservers:item];
+        return;
+    }
+
     void (^assetCompletionHandler)(void) = ^{
         if ([asset statusOfValueForKey:@"tracks" error:nil] == AVKeyValueStatusLoaded) {
             NSArray* tracks = [asset tracksWithMediaType:AVMediaTypeVideo];

@@ -396,8 +396,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
 
   /// Set data source for playing a video from a file.
   ///
-  /// This will load the file from the file-URI given by:
-  /// `'file://${file.path}'`.
+  /// Uses a properly encoded `file://` URI ([Uri.file]) so paths with spaces work on iOS.
   Future<void> setFileDataSource(File file,
       {bool? showNotification,
       String? title,
@@ -406,11 +405,15 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
       String? notificationChannelName,
       Duration? overriddenDuration,
       String? activityName,
-      String? clearKey}) {
+      String? clearKey,
+      VideoFormat? formatHint,
+      String? videoExtension}) {
     return _setDataSource(
       DataSource(
           sourceType: DataSourceType.file,
-          uri: 'file://${file.path}',
+          uri: Uri.file(file.path).toString(),
+          formatHint: formatHint,
+          videoExtension: videoExtension,
           showNotification: showNotification,
           title: title,
           author: author,
