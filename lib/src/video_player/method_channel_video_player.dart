@@ -41,7 +41,6 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   @override
   Future<int?> create({
     BetterPlayerBufferingConfiguration? bufferingConfiguration,
-    Map<String, dynamic>? quanteecConfig
   }) async {
     late final Map<String, dynamic>? response;
     if (bufferingConfiguration == null) {
@@ -55,7 +54,6 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'bufferForPlaybackMs': bufferingConfiguration.bufferForPlaybackMs,
           'bufferForPlaybackAfterRebufferMs':
               bufferingConfiguration.bufferForPlaybackAfterRebufferMs,
-          'quanteecConfig': quanteecConfig
         },
       );
 
@@ -178,32 +176,47 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
 
   @override
   Future<bool?> isAdPlaying(int? textureId) async {
-    return await _channel.invokeMethod<bool>(
-      'isAdPlaying',
-      <String, dynamic>{
-        'textureId': textureId,
-      },
-    );
+    if (textureId == null) return false;
+    try {
+      return await _channel.invokeMethod<bool>(
+        'isAdPlaying',
+        <String, dynamic>{
+          'textureId': textureId,
+        },
+      );
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
   Future<Duration> contentDuration(int? textureId) async {
-    return Duration(
-        milliseconds: await _channel.invokeMethod<int>(
-              'contentDuration',
-              <String, dynamic>{'textureId': textureId},
-            ) ??
-            -1);
+    if (textureId == null) return const Duration(milliseconds: -1);
+    try {
+      return Duration(
+          milliseconds: await _channel.invokeMethod<int>(
+                'contentDuration',
+                <String, dynamic>{'textureId': textureId},
+              ) ??
+              -1);
+    } catch (_) {
+      return const Duration(milliseconds: -1);
+    }
   }
 
   @override
   Future<Duration> contentPosition(int? textureId) async {
-    return Duration(
-        milliseconds: await _channel.invokeMethod<int>(
-              'contentPosition',
-              <String, dynamic>{'textureId': textureId},
-            ) ??
-            -1);
+    if (textureId == null) return Duration.zero;
+    try {
+      return Duration(
+          milliseconds: await _channel.invokeMethod<int>(
+                'contentPosition',
+                <String, dynamic>{'textureId': textureId},
+              ) ??
+              0);
+    } catch (_) {
+      return Duration.zero;
+    }
   }
 
   @override
@@ -271,7 +284,14 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
         ) ??
         0;
 
-    if (milliseconds <= 0) return null;
+    // Live/DRM streams can return sentinel or out-of-range epoch values.
+    const int minEpochMs = -8640000000000000;
+    const int maxEpochMs = 8640000000000000;
+    if (milliseconds <= 0 ||
+        milliseconds < minEpochMs ||
+        milliseconds > maxEpochMs) {
+      return null;
+    }
 
     return DateTime.fromMillisecondsSinceEpoch(milliseconds);
   }

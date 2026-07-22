@@ -74,10 +74,6 @@ import java.util.*
 import kotlin.math.max
 import kotlin.math.min
 import com.google.android.exoplayer2.analytics.AnalyticsListener.EventTime
-import com.quanteec.plugin.settings.QuanteecConfig
-import com.quanteec.quanteecexoplugin2_17.QuanteecBaseDataSource
-import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecBandwidthMeters
-import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecExoCore
 
 internal class BetterPlayer(
     context: Context,
@@ -85,8 +81,7 @@ internal class BetterPlayer(
     private val textureEntry: SurfaceTextureEntry,
     customDefaultLoadControl: CustomDefaultLoadControl?,
     result: MethodChannel.Result,
-    act: Activity,
-    quanteecConfigData: Map<String, Any?>?
+    act: Activity
 ) {
     private val exoPlayer: ExoPlayer?
     private val eventSink = QueuingEventSink()
@@ -116,9 +111,6 @@ internal class BetterPlayer(
     private val activity = act
     private val adsLayout = FrameLayout(act)
     private var isAdPlay = false
-
-    var quanteecConfig: QuanteecConfig? = null
-    var quanteecCore: QuanteecExoCore? = null
 
     init {
         val loadBuilder = DefaultLoadControl.Builder()
@@ -162,70 +154,31 @@ internal class BetterPlayer(
                 )
             }
 
-        if (quanteecConfigData != null) {
-            val videoId = quanteecConfigData?.get("videoId") as? String ?: ""
-            val quanteecKey = quanteecConfigData?.get("qunateecKey") as? String ?: ""
+        val mediaSourceFactory: MediaSourceFactory =
+            DefaultMediaSourceFactory(dataSourceFactory)
+                .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
+                .setAdViewProvider {
+                    val statusBarHeight =
+                        Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
+                            .toInt()
 
-            quanteecConfig = QuanteecConfig.Builder(quanteecKey).setVideoID(videoId).build()
-            quanteecCore = QuanteecExoCore(context, quanteecConfig!!)
+                    val width = activity.resources.displayMetrics.widthPixels
+                    val height =
+                        (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
+                    val lp: FrameLayout.LayoutParams =
+                        FrameLayout.LayoutParams(width, height)
+                    adsLayout.layoutParams = lp
+                    val view = activity.findViewById(android.R.id.content) as ViewGroup
+                    view.addView(adsLayout)
+                    adsLayout.bringToFront()
+                    adsLayout
+                }
 
-            val quanteecDataSourceFactory = QuanteecBaseDataSource.Factory(quanteecCore!!)
-            val quanteecBandwidthMeters = QuanteecBandwidthMeters.Builder(context).build()
-
-            val mediaSourceFactory: MediaSourceFactory =
-                DefaultMediaSourceFactory(quanteecDataSourceFactory)
-                    .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
-                    .setAdViewProvider {
-                        val statusBarHeight =
-                            Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
-                                .toInt()
-
-                        val width = activity.resources.displayMetrics.widthPixels
-                        val height =
-                            (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
-                        val lp: FrameLayout.LayoutParams =
-                            FrameLayout.LayoutParams(width, height)
-                        adsLayout.layoutParams = lp
-                        val view = activity.findViewById(android.R.id.content) as ViewGroup
-                        view.addView(adsLayout)
-                        adsLayout.bringToFront()
-                        adsLayout
-                    }
-
-            exoPlayer = ExoPlayer.Builder(context, renderersFactory)
-                .setTrackSelector(trackSelector)
-                .setLoadControl(loadControl)
-                .setMediaSourceFactory(mediaSourceFactory)
-                .setBandwidthMeter(
-                    quanteecBandwidthMeters
-                ).build()
-        } else {
-            val mediaSourceFactory: MediaSourceFactory =
-                DefaultMediaSourceFactory(dataSourceFactory)
-                    .setAdsLoaderProvider { unusedAdTagUri: MediaItem.AdsConfiguration? -> adsLoader }
-                    .setAdViewProvider {
-                        val statusBarHeight =
-                            Math.ceil((25 * context.resources.displayMetrics.density).toDouble())
-                                .toInt()
-
-                        val width = activity.resources.displayMetrics.widthPixels
-                        val height =
-                            (activity.resources.displayMetrics.widthPixels / 1.7777777778).toInt() + statusBarHeight
-                        val lp: FrameLayout.LayoutParams =
-                            FrameLayout.LayoutParams(width, height)
-                        adsLayout.layoutParams = lp
-                        val view = activity.findViewById(android.R.id.content) as ViewGroup
-                        view.addView(adsLayout)
-                        adsLayout.bringToFront()
-                        adsLayout
-                    }
-
-            exoPlayer = ExoPlayer.Builder(context, renderersFactory)
-                .setTrackSelector(trackSelector)
-                .setLoadControl(loadControl)
-                .setMediaSourceFactory(mediaSourceFactory)
-                .build()
-        }
+        exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
 
         adsLoader.setPlayer(exoPlayer)
         workManager = WorkManager.getInstance(context)
@@ -254,11 +207,12 @@ internal class BetterPlayer(
     }
 
     fun contentDuration(): Long {
-        return exoPlayer!!.duration
+        val duration = exoPlayer?.duration ?: -1L
+        return if (duration == C.TIME_UNSET) -1L else duration
     }
 
     fun contentPosition(): Long {
-        return exoPlayer!!.contentPosition
+        return exoPlayer?.contentPosition ?: 0L
     }
 
     fun setDataSource(
@@ -369,9 +323,6 @@ internal class BetterPlayer(
 
         exoPlayer?.prepare()
         exoPlayer?.playWhenReady = true
-        exoPlayer?.let {
-            quanteecCore?.setPlayer(it);
-        }
         result.success(null)
     }
 
@@ -623,9 +574,6 @@ internal class BetterPlayer(
         exoPlayer?.setMediaSource(mediaSource)
         exoPlayer?.setMediaItem(mediaItem)
         exoPlayer?.playWhenReady = true
-        exoPlayer?.let {
-            quanteecCore?.setPlayer(it);
-        }
     }
 
     private fun setupVideoPlayer(
@@ -961,8 +909,6 @@ internal class BetterPlayer(
         eventChannel.setStreamHandler(null)
         surface?.release()
         exoPlayer?.release()
-        quanteecCore?.release()
-        quanteecCore = null
     }
 
     override fun equals(other: Any?): Boolean {
