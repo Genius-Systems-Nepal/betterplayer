@@ -75,7 +75,6 @@ class BetterPlayerDataSource {
   /// BetterPlayerConfiguration.
   final Widget? placeholder;
 
-  final Map<String, dynamic>? quanteecConfig;
 
   ///Configuration of video buffering. Currently only supported in Android
   ///platform.
@@ -104,7 +103,6 @@ class BetterPlayerDataSource {
     this.videoExtension,
     this.drmConfiguration,
     this.placeholder,
-    this.quanteecConfig,
     this.bufferingConfiguration = const BetterPlayerBufferingConfiguration(),
   }) : assert(
             (type == BetterPlayerDataSourceType.network ||
@@ -132,7 +130,6 @@ class BetterPlayerDataSource {
     BetterPlayerVideoFormat? videoFormat,
     BetterPlayerDrmConfiguration? drmConfiguration,
     Widget? placeholder,
-    Map<String, dynamic>? quanteecConfig,
     BetterPlayerBufferingConfiguration bufferingConfiguration =
         const BetterPlayerBufferingConfiguration(),
   }) {
@@ -154,7 +151,6 @@ class BetterPlayerDataSource {
       drmConfiguration: drmConfiguration,
       placeholder: placeholder,
       bufferingConfiguration: bufferingConfiguration,
-      quanteecConfig: quanteecConfig,
     );
   }
 
@@ -169,8 +165,7 @@ class BetterPlayerDataSource {
       BetterPlayerCacheConfiguration? cacheConfiguration,
       BetterPlayerNotificationConfiguration? notificationConfiguration,
       Duration? overriddenDuration,
-      Widget? placeholder,
-      Map<String, dynamic>? quanteecConfig}) {
+      Widget? placeholder,}) {
     return BetterPlayerDataSource(BetterPlayerDataSourceType.file, url,
         adsUrl: adsUrl,
         subtitles: subtitles,
@@ -182,8 +177,7 @@ class BetterPlayerDataSource {
             const BetterPlayerNotificationConfiguration(
                 showNotification: false),
         overriddenDuration: overriddenDuration,
-        placeholder: placeholder,
-        quanteecConfig: quanteecConfig);
+        placeholder: placeholder,);
   }
 
   ///Factory method to build network data source which uses bytes as data source.
@@ -197,8 +191,7 @@ class BetterPlayerDataSource {
       BetterPlayerCacheConfiguration? cacheConfiguration,
       BetterPlayerNotificationConfiguration? notificationConfiguration,
       Duration? overriddenDuration,
-      Widget? placeholder,
-      Map<String, dynamic>? quanteecConfig}) {
+      Widget? placeholder,}) {
     return BetterPlayerDataSource(BetterPlayerDataSourceType.memory, "",
         videoExtension: videoExtension,
         bytes: bytes,
@@ -211,8 +204,7 @@ class BetterPlayerDataSource {
             const BetterPlayerNotificationConfiguration(
                 showNotification: false),
         overriddenDuration: overriddenDuration,
-        placeholder: placeholder,
-        quanteecConfig: quanteecConfig);
+        placeholder: placeholder,);
   }
 
   BetterPlayerDataSource copyWith({
@@ -235,7 +227,6 @@ class BetterPlayerDataSource {
     String? videoExtension,
     BetterPlayerDrmConfiguration? drmConfiguration,
     Widget? placeholder,
-    Map<String, dynamic>? quanteecConfig,
     BetterPlayerBufferingConfiguration? bufferingConfiguration =
         const BetterPlayerBufferingConfiguration(),
   }) {
@@ -259,7 +250,6 @@ class BetterPlayerDataSource {
       videoExtension: videoExtension ?? this.videoExtension,
       drmConfiguration: drmConfiguration ?? this.drmConfiguration,
       placeholder: placeholder ?? this.placeholder,
-      quanteecConfig: quanteecConfig,
       bufferingConfiguration:
           bufferingConfiguration ?? this.bufferingConfiguration,
     );

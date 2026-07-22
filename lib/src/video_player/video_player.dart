@@ -190,10 +190,9 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   VideoPlayerController({
     this.bufferingConfiguration = const BetterPlayerBufferingConfiguration(),
     bool autoCreate = true,
-    Map<String, dynamic>? quanteecConfig,
   }) : super(VideoPlayerValue(duration: null)) {
     if (autoCreate) {
-      _create(quanteecConfig);
+      _create();
     }
   }
 
@@ -216,10 +215,9 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   int? get textureId => _textureId;
 
   /// Attempts to open the given [dataSource] and load metadata about the video.
-  Future<void> _create(Map<String, dynamic>? quanteecConfig) async {
+  Future<void> _create() async {
     _textureId = await _videoPlayerPlatform.create(
-        bufferingConfiguration: bufferingConfiguration,
-        quanteecConfig: quanteecConfig);
+        bufferingConfiguration: bufferingConfiguration);
     _creatingCompleter.complete(null);
 
     unawaited(_applyLooping());
@@ -472,15 +470,30 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   }
 
   Future<bool?> isAdPlaying() async {
-    return await _videoPlayerPlatform.isAdPlaying(_textureId);
+    if (_isDisposed || !_created) return false;
+    try {
+      return await _videoPlayerPlatform.isAdPlaying(_textureId);
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<Duration?> contentDuration() async {
-    return await _videoPlayerPlatform.contentDuration(_textureId);
+    if (_isDisposed || !_created) return null;
+    try {
+      return await _videoPlayerPlatform.contentDuration(_textureId);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Duration?> contentPosition() async {
-    return await _videoPlayerPlatform.contentPosition(_textureId);
+    if (_isDisposed || !_created) return null;
+    try {
+      return await _videoPlayerPlatform.contentPosition(_textureId);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Sets whether or not the video should loop after playing once. See also
