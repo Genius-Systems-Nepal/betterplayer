@@ -39,6 +39,26 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
+  Future<void> playWhenReadyTrue(int? textureId) async{
+    return await _channel.invokeMethod<void>(
+      'playWhenReadyTrue',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
+  Future<void> playWhenReadyFalse(int? textureId) async{
+    return await _channel.invokeMethod<void>(
+      'playWhenReadyFalse',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
   Future<int?> create({
     BetterPlayerBufferingConfiguration? bufferingConfiguration,
     Map<String, dynamic>? quanteecConfig

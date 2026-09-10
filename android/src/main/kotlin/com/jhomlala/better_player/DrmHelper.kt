@@ -14,14 +14,10 @@ import com.google.android.exoplayer2.source.dash.DashMediaSource
 import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
 import com.google.android.exoplayer2.util.Util
-import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.nio.charset.StandardCharsets
 import java.util.HashMap
 import java.util.UUID
 
@@ -30,7 +26,8 @@ class DrmHelper {
     fun buildDrmMediaSource(
         uri: Uri,
         context: Context,
-        drmToken: String,
+        drmToken: String?,
+        drmHeaders: Map<String, String>?,
         licenseUrl: String
     ): MediaSource {
         val defaultDrmSessionManager =
@@ -44,10 +41,8 @@ class DrmHelper {
                         val url = request.defaultUrl + "&signedRequest=" + String(request.data)
                         return executePost(url)
                     } catch (e: IOException) {
-                        e.printStackTrace()
+                        throw e
                     }
-
-                    return ByteArray(0)
                 }
 
                 @Throws(MediaDrmCallbackException::class)
@@ -55,16 +50,15 @@ class DrmHelper {
                     uuid: UUID,
                     request: ExoMediaDrm.KeyRequest
                 ): ByteArray {
-                    val postParameters: MutableMap<String, String> = HashMap()
-                    postParameters["kid"] = ""
-                    postParameters["token"] = drmToken
                     try {
-                        return executePost(request.data, postParameters, licenseUrl)
+                        return executePost(
+                            request.data,
+                            buildRequestHeaders(drmToken, drmHeaders),
+                            licenseUrl
+                        )
                     } catch (e: IOException) {
-                        e.printStackTrace()
+                        throw e
                     }
-
-                    return ByteArray(0)
                 }
             })
 
@@ -100,7 +94,7 @@ class DrmHelper {
     @Throws(IOException::class)
     private fun executePost(
         bytearray: ByteArray,
-        requestProperties: Map<String, String>,
+        requestHeaders: Map<String, String>,
         licenseUrl: String
     ): ByteArray {
         var data: ByteArray? = bytearray
@@ -111,31 +105,17 @@ class DrmHelper {
             urlConnection.requestMethod = "POST"
             urlConnection.doOutput = true
             urlConnection.doInput = true
-            urlConnection.setRequestProperty("Content-Type", "application/json")
+            urlConnection.setRequestProperty("Content-Type", "application/octet-stream")
             urlConnection.connectTimeout = 30000
             urlConnection.readTimeout = 30000
 
-            val json = JSONObject()
-            try {
-                val jsonArray = JSONArray()
-                val bitmask = 0x000000FF
-                for (aData in data!!) {
-                    val `val` = aData.toInt()
-                    jsonArray.put(bitmask and `val`)
-                }
-
-                json.put("token", requestProperties["token"])
-                json.put("drm_info", jsonArray)
-                json.put("kid", requestProperties["kid"])
-            } catch (e: JSONException) {
-                e.printStackTrace()
+            requestHeaders.forEach { (key, value) ->
+                urlConnection.setRequestProperty(key, value)
             }
 
-            data = json.toString().toByteArray(StandardCharsets.UTF_8)
-
             val out = urlConnection.outputStream
-            out.use {
-                it.write(data)
+            out.use { out ->
+                out.write(data)
             }
 
             val responseCode = urlConnection.responseCode
@@ -157,6 +137,19 @@ class DrmHelper {
         } finally {
             urlConnection?.disconnect()
         }
+    }
+
+    private fun buildRequestHeaders(
+        drmToken: String?,
+        drmHeaders: Map<String, String>?
+    ): Map<String, String> {
+        val requestHeaders = HashMap<String, String>()
+        drmHeaders?.let { requestHeaders.putAll(it) }
+        val normalizedToken = drmToken?.trim()?.takeIf {
+            it.isNotEmpty() && !it.equals("null", ignoreCase = true)
+        }
+        normalizedToken?.let { requestHeaders["nv-authorizations"] = it }
+        return requestHeaders
     }
 
     @Throws(IOException::class)

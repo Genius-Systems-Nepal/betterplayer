@@ -17,19 +17,17 @@ import android.provider.Settings
 import android.util.Log
 import android.util.LongSparseArray
 import com.jhomlala.better_player.BetterPlayerCache.releaseCache
-import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.embedding.engine.plugins.activity.ActivityAware
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
 import io.flutter.embedding.engine.loader.FlutterLoader
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.EventChannel
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.view.TextureRegistry
-import java.lang.Exception
-import java.util.HashMap
 
 /**
  * Android platform implementation of the VideoPlayerPlugin.
@@ -130,7 +128,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             STOP_PRE_CACHE_METHOD -> stopPreCache(call, result)
             CLEAR_CACHE_METHOD -> clearCache(result)
             else -> {
-                val textureId = (call.argument<Any>(TEXTURE_ID_PARAMETER) as Number?)!!.toLong()
+                val textureId = (call.argument<Any>(TEXTURE_ID_PARAMETER) as Number?)?.toLong() ?: 0L
                 val player = videoPlayers[textureId]
                 if (player == null) {
                     result.error(
@@ -145,20 +143,12 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         }
     }
 
-    private fun isAdPlaying(player: BetterPlayer): Boolean {
-        return player.isAdPlaying()
-    }
-
     private fun contentDuration(player: BetterPlayer) : Long{
         return player.contentDuration()
     }
 
     private fun contentPosition(player: BetterPlayer) : Long {
         return player.contentPosition()
-    }
-
-    private fun disposeAdView(player: BetterPlayer) {
-        player.removeAdsView()
     }
 
     private fun onMethodCall(
@@ -299,7 +289,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 null,
                 result,
                 headers,
-                false,
+                null,
                 0L,
                 0L,
                 overriddenDuration.toLong(),
@@ -331,7 +321,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 formatHint,
                 result,
                 headers,
-                useCache,
+                null,
                 maxCacheSize,
                 maxCacheFileSize,
                 overriddenDuration.toLong(),
@@ -451,6 +441,9 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         return defaultValue
     }
 
+    private fun isAdPlaying(player: BetterPlayer): Boolean {
+        return player.isAdPlaying()
+    }
 
     private fun isPictureInPictureSupported(): Boolean {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity != null && activity!!.packageManager
@@ -528,6 +521,10 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         videoPlayers.remove(textureId)
         dataSources.remove(textureId)
         stopPipHandler()
+    }
+
+    private fun disposeAdView(player: BetterPlayer) {
+        player.removeAdsView()
     }
 
     private fun stopPipHandler() {
@@ -639,5 +636,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val IS_AD_PLAYING = "isAdPlaying"
         private const val CONTENT_DURATION = "contentDuration"
         private const val CONTENT_POSITION = "contentPosition"
+        private const val PLAY_WHEN_READY_TRUE = "playWhenReadyTrue"
+        private const val PLAY_WHEN_READY_FALSe = "playWhenReadyFalse"
     }
 }

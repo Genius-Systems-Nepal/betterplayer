@@ -14,13 +14,14 @@ class BetterPlayer extends StatefulWidget {
 
   factory BetterPlayer.network(
     String url, {
+      String? adsUrl,
     BetterPlayerConfiguration? betterPlayerConfiguration,
   }) =>
       BetterPlayer(
         controller: BetterPlayerController(
           betterPlayerConfiguration ?? const BetterPlayerConfiguration(),
           betterPlayerDataSource:
-              BetterPlayerDataSource(BetterPlayerDataSourceType.network, url),
+              BetterPlayerDataSource(BetterPlayerDataSourceType.network, url,adsUrl: adsUrl),
         ),
       );
 

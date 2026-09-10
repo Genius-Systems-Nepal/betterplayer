@@ -272,7 +272,7 @@ internal class BetterPlayer(
         formatHint: String?,
         result: MethodChannel.Result,
         headers: Map<String, String>?,
-        useCache: Boolean,
+        useCache: Boolean?,
         maxCacheSize: Long,
         maxCacheFileSize: Long,
         overriddenDuration: Long,
@@ -292,7 +292,10 @@ internal class BetterPlayer(
         var dataSourceFactory: DataSource.Factory?
         val userAgent = getUserAgent(headers)
 
-        val drmToken: String? = extraParams?.get("drm_token")
+        val drmToken: String? = extraParams
+            ?.get("drm_token")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 
         if (licenseUrl != null && licenseUrl.isNotEmpty()) {
             val httpMediaDrmCallback =
@@ -355,9 +358,11 @@ internal class BetterPlayer(
             dataSourceFactory = DefaultDataSource.Factory(context)
         }
 
-        if (!licenseUrl.isNullOrEmpty() && !drmToken.isNullOrEmpty()) {
+        val contentType = Util.inferContentType(uri, null)
+        if (!licenseUrl.isNullOrEmpty() && contentType == C.TYPE_DASH) {
             val drmHelper = DrmHelper()
-            val drmMediaSource = drmHelper.buildDrmMediaSource(uri, context, drmToken, licenseUrl)
+            val drmMediaSource =
+                drmHelper.buildDrmMediaSource(uri, context, drmToken, drmHeaders, licenseUrl)
             exoPlayer?.setMediaSource(drmMediaSource)
         } else {
             buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
