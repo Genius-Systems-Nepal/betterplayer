@@ -509,11 +509,14 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                 NSLog(item.error.debugDescription);
 
                 if (_eventSink != nil) {
+                    NSString *errorMessage = [NSString stringWithFormat:@"Failed to load video: %@ | Debug: %@",
+                                                                        [item.error localizedDescription],
+                                                                        item.error.debugDescription ?: @"No debug details available"];
+
                     _eventSink([FlutterError
-                                errorWithCode:@"VideoError"
-                                message:[@"Failed to load video: "
-                                         stringByAppendingString:[item.error localizedDescription]]
-                                details:nil]);
+                            errorWithCode:@"VideoError"
+                                  message:errorMessage
+                                  details:nil]);
                 }
                 break;
             case AVPlayerItemStatusUnknown:
