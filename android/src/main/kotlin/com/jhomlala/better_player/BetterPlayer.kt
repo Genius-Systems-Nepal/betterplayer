@@ -346,14 +346,14 @@ internal class BetterPlayer(
             dataSourceFactory = buildRtmp()
         } else if (isHTTP(uri)) {
             dataSourceFactory = getDataSourceFactory(userAgent, headers)
-//            if (useCache && maxCacheSize > 0 && maxCacheFileSize > 0) {
-//                dataSourceFactory = CacheDataSourceFactory(
-//                    context,
-//                    maxCacheSize,
-//                    maxCacheFileSize,
-//                    dataSourceFactory
-//                )
-//            }
+            if (useCache == true && maxCacheSize > 0 && maxCacheFileSize > 0) {
+                dataSourceFactory = CacheDataSourceFactory(
+                    context,
+                    maxCacheSize,
+                    maxCacheFileSize,
+                    dataSourceFactory
+                )
+            }
         } else {
             dataSourceFactory = DefaultDataSource.Factory(context)
         }
