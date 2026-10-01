@@ -137,6 +137,11 @@ abstract class VideoPlayerPlatform {
     throw UnimplementedError('getAbsolutePosition() has not been implemented.');
   }
 
+  /// Whether the current media item is live / dynamic.
+  Future<bool?> getIsLiveMedia(int? textureId) {
+    throw UnimplementedError('getIsLiveMedia() has not been implemented.');
+  }
+
   ///Enables PiP mode.
   Future<void> enablePictureInPicture(int? textureId, double? top, double? left,
       double? width, double? height) {
@@ -418,7 +423,8 @@ class VideoEvent {
     this.buffered,
     this.position,
     this.nerdStat,
-    this.bitrateUpdate = 0
+    this.bitrateUpdate = 0,
+    this.isLiveMedia = false,
   });
 
   /// The type of the event.
@@ -452,6 +458,9 @@ class VideoEvent {
 
   ///bitrate
   final int bitrateUpdate;
+
+  /// Native live/dynamic flag from initialized event.
+  final bool isLiveMedia;
 
   @override
   bool operator ==(Object other) {

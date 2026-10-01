@@ -799,12 +799,22 @@ internal class BetterPlayer(
             return exoPlayer?.currentPosition ?: 0L
         }
 
+    /** True when the current window is dynamic (live) or duration is unset. */
+    val isLiveMedia: Boolean
+        get() {
+            val player = exoPlayer ?: return false
+            if (player.isCurrentWindowDynamic) return true
+            val duration = player.duration
+            return duration == C.TIME_UNSET || duration <= 0L
+        }
+
     private fun sendInitialized() {
         if (isInitialized) {
             val event: MutableMap<String, Any?> = HashMap()
             event["event"] = "initialized"
             event["key"] = key
             event["duration"] = getDuration()
+            event["isLiveMedia"] = isLiveMedia
             if (exoPlayer?.videoFormat != null) {
                 val videoFormat = exoPlayer.videoFormat
                 var width = videoFormat?.width

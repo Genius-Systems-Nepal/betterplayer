@@ -609,6 +609,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
             @"duration" : @([self duration]),
             @"width" : @(fabs(realSize.width) ? : width),
             @"height" : @(fabs(realSize.height) ? : height),
+            @"isLiveMedia" : @([self isLiveMedia]),
             @"key" : _key
         });
     }
@@ -640,6 +641,14 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (int64_t)absolutePosition {
     return [BetterPlayerTimeUtils FLTNSTimeIntervalToMillis:([[[_player currentItem] currentDate] timeIntervalSince1970])];
+}
+
+- (BOOL)isLiveMedia {
+    AVPlayerItem *item = [_player currentItem];
+    if (item == nil) {
+        return NO;
+    }
+    return CMTIME_IS_INDEFINITE(item.duration);
 }
 
 - (int64_t)duration {

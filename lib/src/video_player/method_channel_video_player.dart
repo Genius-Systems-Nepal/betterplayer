@@ -303,6 +303,14 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
+  Future<bool?> getIsLiveMedia(int? textureId) {
+    return _channel.invokeMethod<bool>(
+      'isLiveMedia',
+      <String, dynamic>{'textureId': textureId},
+    );
+  }
+
+  @override
   Future<void> enablePictureInPicture(int? textureId, double? top, double? left,
       double? width, double? height) async {
     return _channel.invokeMethod<void>(
@@ -449,6 +457,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
             key: key,
             duration: Duration(milliseconds: map['duration'] as int),
             size: size,
+            isLiveMedia: map['isLiveMedia'] == true,
           );
         case 'completed':
           return VideoEvent(

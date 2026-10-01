@@ -37,6 +37,7 @@ class VideoPlayerValue {
     this.nerdStatValue = "",
     this.bitrateValue = 0,
     this.errorCode = "0",
+    this.isLiveMedia = false,
   });
 
   /// Returns an instance with a `null` [Duration].
@@ -107,6 +108,9 @@ class VideoPlayerValue {
   /// ErrorCode
   final String errorCode;
 
+  /// Native player reported a dynamic / live media item.
+  final bool isLiveMedia;
+
   /// Returns [size.width] / [size.height] when size is non-null, or `1.0.` when
   /// size is null or the aspect ratio would be less than or equal to 0.0.
   double get aspectRatio {
@@ -137,7 +141,8 @@ class VideoPlayerValue {
       bool? isPip,
       String? nerdStatValue,
       int? bitrateValue,
-      String? errorCode}) {
+      String? errorCode,
+      bool? isLiveMedia}) {
     return VideoPlayerValue(
         duration: duration ?? this.duration,
         size: size ?? this.size,
@@ -153,7 +158,8 @@ class VideoPlayerValue {
         isPip: isPip ?? this.isPip,
         nerdStatValue: nerdStatValue ?? this.nerdStatValue,
         bitrateValue: bitrateValue ?? this.bitrateValue,
-        errorCode: errorCode ?? this.errorCode);
+        errorCode: errorCode ?? this.errorCode,
+        isLiveMedia: isLiveMedia ?? this.isLiveMedia);
   }
 
   @override
@@ -235,6 +241,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           value = value.copyWith(
             duration: event.duration,
             size: event.size,
+            isLiveMedia: event.isLiveMedia,
           );
           _initializingCompleter.complete(null);
           _applyPlayPause();
@@ -571,6 +578,19 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
       return null;
     }
     return _videoPlayerPlatform.getAbsolutePosition(_textureId);
+  }
+
+  /// Native live/dynamic media detection (ExoPlayer window / AVPlayer duration).
+  Future<bool> get isLiveMedia async {
+    if (_isDisposed) {
+      return value.isLiveMedia;
+    }
+    try {
+      final bool? native =
+          await _videoPlayerPlatform.getIsLiveMedia(_textureId);
+      if (native != null) return native;
+    } catch (_) {}
+    return value.isLiveMedia;
   }
 
   /// Sets the video's current timestamp to be at [moment]. The next
