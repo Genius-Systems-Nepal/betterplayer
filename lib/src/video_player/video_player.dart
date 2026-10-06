@@ -278,6 +278,8 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           value = value.copyWith(isPip: true);
           break;
         case VideoEventType.pipStop:
+          // Keep isPlaying if native immediately resumes after expand-to-app.
+          // A teardown pause must not force platform pause once isPip clears.
           value = value.copyWith(isPip: false);
           break;
         case VideoEventType.nerdStat:
