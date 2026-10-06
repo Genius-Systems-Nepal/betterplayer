@@ -174,7 +174,7 @@ AVPictureInPictureController *_pipController;
     _disposed = false;
     _failedCount = 0;
     _key = nil;
-    _adTagUrlOrAdsResponse = @"";
+    _adTagUrlOrAdsResponse = @"";t
     if (_player.currentItem == nil) {
         return;
     }
@@ -447,14 +447,19 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                        context:(void*)context {
 
     if ([path isEqualToString:@"rate"]) {
+        BOOL pipActive = NO;
         if (@available(iOS 10.0, *)) {
-            if (_pipController.pictureInPictureActive == true){
+            pipActive = _pipController != nil && _pipController.pictureInPictureActive == YES;
+            if (pipActive){
                 if (_lastAvPlayerTimeControlStatus != [NSNull null] && _lastAvPlayerTimeControlStatus == _player.timeControlStatus){
                     return;
                 }
 
                 if (_player.timeControlStatus == AVPlayerTimeControlStatusPaused){
                     _lastAvPlayerTimeControlStatus = _player.timeControlStatus;
+                    // Keep native flag in sync with system PiP pause so stalled
+                    // recovery does not fight the user after they resume.
+                    _isPlaying = false;
                     if (_eventSink != nil) {
                       _eventSink(@{@"event" : @"pause"});
                     }
@@ -463,14 +468,19 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                 }
                 if (_player.timeControlStatus == AVPlayerTimeControlStatusPlaying){
                     _lastAvPlayerTimeControlStatus = _player.timeControlStatus;
+                    _isPlaying = true;
                     if (_eventSink != nil) {
                       _eventSink(@{@"event" : @"play"});
                     }
+                    return;
                 }
+                return;
             }
         }
 
-        if (_player.rate == 0 && //if player rate dropped to 0
+        // Do not treat intentional PiP pause as a stall.
+        if (!pipActive &&
+            _player.rate == 0 && //if player rate dropped to 0
             CMTIME_COMPARE_INLINE(_player.currentItem.currentTime, >, kCMTimeZero) && //if video was started
             CMTIME_COMPARE_INLINE(_player.currentItem.currentTime, <, _player.currentItem.duration) && //but not yet finished
             _isPlaying) { //instance variable to handle overall state (changed to YES when user triggers playback)
@@ -852,6 +862,14 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (_eventSink != nil) {
         _eventSink(@{@"event" : @"pipStart"});
     }
+    // PIP_OVERLAY_FIX
+    // Detach the temp layer from the root window so it cannot paint over other
+    // tabs. Keep the layer object + _pipController alive for system PiP.
+    // Do not use hidden/opacity — those freeze PiP pause/resume on iOS.
+    if (self._playerLayer != nil) {
+        [self._playerLayer removeFromSuperlayer];
+    }
+    // END PIP_OVERLAY_FIX
 }
 
 - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController  API_AVAILABLE(ios(9.0)){

@@ -256,10 +256,20 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           break;
 
         case VideoEventType.play:
-          play();
+          // While system PiP owns the AVPlayer, only sync local state — calling
+          // play()/pause() again races the PiP controls and can freeze resume.
+          if (value.isPip) {
+            value = value.copyWith(isPlaying: true);
+          } else {
+            play();
+          }
           break;
         case VideoEventType.pause:
-          pause();
+          if (value.isPip) {
+            value = value.copyWith(isPlaying: false);
+          } else {
+            pause();
+          }
           break;
         case VideoEventType.seek:
           seekTo(event.position);
@@ -271,11 +281,11 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           value = value.copyWith(isPip: false);
           break;
         case VideoEventType.nerdStat:
-          value = value.copyWith(isPip: false, nerdStatValue: event.nerdStat);
+          // Do not clear isPip — bitrate/nerd ticks must not end a PiP session.
+          value = value.copyWith(nerdStatValue: event.nerdStat);
           break;
         case VideoEventType.bitrateUpdate:
-          value =
-              value.copyWith(isPip: false, bitrateValue: event.bitrateUpdate);
+          value = value.copyWith(bitrateValue: event.bitrateUpdate);
           break;
         case VideoEventType.unknown:
           break;
