@@ -8,14 +8,18 @@ import android.app.AppOpsManager
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.util.LongSparseArray
+import android.util.Rational
+import android.view.WindowManager
 import com.jhomlala.better_player.BetterPlayerCache.releaseCache
 import io.flutter.embedding.engine.loader.FlutterLoader
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -41,6 +45,9 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     private var activity: Activity? = null
     private var pipHandler: Handler? = null
     private var pipRunnable: Runnable? = null
+    private var pipEntered = false
+    private var pipEnterDeadline = 0L
+    private var pipClearedSecure = false
     override fun onAttachedToEngine(binding: FlutterPluginBinding) {
         val loader = FlutterLoader()
         flutterState = FlutterState(
@@ -81,9 +88,13 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
 
     override fun onDetachedFromActivityForConfigChanges() {}
 
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {}
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
 
-    override fun onDetachedFromActivity() {}
+    override fun onDetachedFromActivity() {
+        activity = null
+    }
 
     private fun disposeAllPlayers() {
         for (i in 0 until videoPlayers.size()) {
@@ -486,33 +497,75 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
 
     private fun enablePictureInPicture(player: BetterPlayer) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val act = activity ?: return
+            prepareActivityForPip(act)
             player.setupMediaSession(flutterState!!.applicationContext)
-            activity!!.enterPictureInPictureMode(PictureInPictureParams.Builder().build())
-            startPictureInPictureListenerTimer(player)
-            player.onPictureInPictureStatusChanged(true)
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .build()
+            val entered = act.enterPictureInPictureMode(params)
+            if (entered) {
+                startPictureInPictureListenerTimer(player)
+                player.onPictureInPictureStatusChanged(true)
+            } else {
+                restoreActivityAfterPip()
+            }
         }
     }
 
     private fun disablePictureInPicture(player: BetterPlayer) {
         stopPipHandler()
-        activity!!.moveTaskToBack(false)
+        activity?.moveTaskToBack(false)
         player.onPictureInPictureStatusChanged(false)
         player.disposeMediaSession()
+        restoreActivityAfterPip()
+    }
+
+    private fun prepareActivityForPip(act: Activity) {
+        val flags = act.window.attributes.flags
+        if (flags and WindowManager.LayoutParams.FLAG_SECURE != 0) {
+            pipClearedSecure = true
+            act.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+
+    private fun restoreActivityAfterPip() {
+        val act = activity ?: return
+        if (pipClearedSecure) {
+            act.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            pipClearedSecure = false
+        }
+        // Keep UNSPECIFIED so SystemChrome can rotate after PiP. Restoring
+        // SCREEN_ORIENTATION_PORTRAIT left the activity portrait while the
+        // player still used landscape/fullscreen layout.
+        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
     private fun startPictureInPictureListenerTimer(player: BetterPlayer) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            pipEntered = false
+            pipEnterDeadline = SystemClock.uptimeMillis() + 2000
             pipHandler = Handler(Looper.getMainLooper())
             pipRunnable = Runnable {
-                if (activity!!.isInPictureInPictureMode) {
-                    pipHandler!!.postDelayed(pipRunnable!!, 100)
-                } else {
-                    player.onPictureInPictureStatusChanged(false)
-                    player.disposeMediaSession()
-                    stopPipHandler()
+                val inPip = activity?.isInPictureInPictureMode == true
+                when {
+                    inPip -> {
+                        pipEntered = true
+                        pipHandler?.postDelayed(pipRunnable!!, 250)
+                    }
+                    !pipEntered && SystemClock.uptimeMillis() < pipEnterDeadline -> {
+                        pipHandler?.postDelayed(pipRunnable!!, 100)
+                    }
+                    else -> {
+                        player.onPictureInPictureStatusChanged(false)
+                        player.disposeMediaSession()
+                        restoreActivityAfterPip()
+                        stopPipHandler()
+                    }
                 }
             }
-            pipHandler!!.post(pipRunnable!!)
+            pipHandler?.postDelayed(pipRunnable!!, 400)
         }
     }
 
