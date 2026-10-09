@@ -43,6 +43,7 @@ import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource
 import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource
+import com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
 import com.google.android.exoplayer2.trackselection.TrackSelectionOverrides
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
@@ -50,6 +51,7 @@ import com.google.android.exoplayer2.ui.PlayerNotificationManager.BitmapCallback
 import com.google.android.exoplayer2.ui.PlayerNotificationManager.MediaDescriptionAdapter
 import com.google.android.exoplayer2.ui.DefaultTrackNameProvider
 import com.google.android.exoplayer2.upstream.DataSource
+import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
@@ -90,7 +92,21 @@ internal class BetterPlayer(
 ) {
     private val exoPlayer: ExoPlayer?
     private val eventSink = QueuingEventSink()
-    private val trackSelector: DefaultTrackSelector = DefaultTrackSelector(context)
+
+    /// Low initial estimate so Auto ABR starts on a low rung, then upshifts.
+    private val bandwidthMeter: DefaultBandwidthMeter =
+        DefaultBandwidthMeter.Builder(context)
+            .setInitialBitrateEstimate(ABR_INITIAL_BITRATE_ESTIMATE)
+            .build()
+    private val trackSelector: DefaultTrackSelector = DefaultTrackSelector(
+        context,
+        AdaptiveTrackSelection.Factory(
+            /* minDurationForQualityIncreaseMs */ 10_000,
+            /* maxDurationForQualityDecreaseMs */ 25_000,
+            /* minDurationToRetainAfterDiscardMs */ 25_000,
+            /* bandwidthFraction */ 0.7f
+        )
+    )
     private val loadControl: LoadControl
     private var isInitialized = false
     private var surface: Surface? = null
@@ -227,6 +243,7 @@ internal class BetterPlayer(
                 .setTrackSelector(trackSelector)
                 .setLoadControl(loadControl)
                 .setMediaSourceFactory(mediaSourceFactory)
+                .setBandwidthMeter(bandwidthMeter)
                 .build()
         }
 
@@ -1001,6 +1018,9 @@ internal class BetterPlayer(
         private const val FORMAT_OTHER = "other"
         private const val DEFAULT_NOTIFICATION_CHANNEL = "BETTER_PLAYER_NOTIFICATION"
         private const val NOTIFICATION_ID = 20772077
+
+        /** ~300 kbps — prefer lowest viable ladder rung at startup. */
+        private const val ABR_INITIAL_BITRATE_ESTIMATE = 300_000L
 
         //Clear cache without accessing BetterPlayerCache.
         fun clearCache(context: Context?, result: MethodChannel.Result) {
