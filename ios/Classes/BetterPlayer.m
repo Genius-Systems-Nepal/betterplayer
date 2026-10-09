@@ -59,6 +59,9 @@ API_AVAILABLE(ios(9.0))
 AVPictureInPictureController *_pipController;
 #endif
 
+/** ~300 kbps startup peak so Auto ABR begins on a low rung, then unlocks. */
+static const double kAbrStartupPeakBitRate = 300000.0;
+
 @implementation BetterPlayer {
     NSTimer *nerdStatTimer;
     BetterPlayerVuDrmAssetsLoaderDelegate *_vuDrmAssetsloaderDelegate;
@@ -73,6 +76,8 @@ AVPictureInPictureController *_pipController;
     BOOL _pipExpandingToApp;
     /// Resume in-app playback after PiP stop when expanding while playing.
     BOOL _pipResumeAfterStop;
+    /// YES after Auto (0x0x0) until buffer is healthy and peak cap is cleared.
+    BOOL _autoAbrPendingUnlock;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame dictQuanteecConfig:(NSDictionary * _Nullable)dictQuanteecConfig {
@@ -205,6 +210,20 @@ AVPictureInPictureController *_pipController;
             _eventSink(@{@"event" : @"bitrateUpdate", @"values" : [NSNumber numberWithInt:(int)lastBitRate]});
         }
     }
+    // Once AVPlayer reports a variant, lift the startup peak so ABR can upshift.
+    if (_autoAbrPendingUnlock && lastEventNumber > 0) {
+        [self unlockAutoAbrIfNeeded];
+    }
+}
+
+- (void)unlockAutoAbrIfNeeded {
+    if (!_autoAbrPendingUnlock) {
+        return;
+    }
+    _autoAbrPendingUnlock = NO;
+    if (_player.currentItem != nil) {
+        _player.currentItem.preferredPeakBitRate = 0;
+    }
 }
 
 - (void)clear {
@@ -215,6 +234,7 @@ AVPictureInPictureController *_pipController;
     _failedCount = 0;
     _key = nil;
     _adTagUrlOrAdsResponse = @"";
+    _autoAbrPendingUnlock = NO;
     if (_player.currentItem == nil) {
         return;
     }
@@ -595,6 +615,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         }
     } else if (context == playbackLikelyToKeepUpContext) {
         if ([[_player currentItem] isPlaybackLikelyToKeepUp]) {
+            [self unlockAutoAbrIfNeeded];
             [self updatePlayingState];
             if (_eventSink != nil) {
                 _eventSink(@{@"event" : @"bufferingEnd", @"key" : _key});
@@ -780,6 +801,18 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 
 - (void)setTrackParameters:(int) width: (int) height: (int)bitrate {
+    if (width == 0 && height == 0 && bitrate == 0) {
+        // Auto: start with a low peak so playback begins on a low rung, then unlock.
+        _autoAbrPendingUnlock = YES;
+        _player.currentItem.preferredPeakBitRate = kAbrStartupPeakBitRate;
+        if (@available
+        (iOS
+        11.0, *)) {
+            _player.currentItem.preferredMaximumResolution = CGSizeZero;
+        }
+        return;
+    }
+    _autoAbrPendingUnlock = NO;
     _player.currentItem.preferredPeakBitRate = bitrate;
     if (@available(iOS 11.0, *)) {
         if (width == 0 && height == 0){
