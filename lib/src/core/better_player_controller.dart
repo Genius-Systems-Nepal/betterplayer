@@ -1026,7 +1026,10 @@ class BetterPlayerController {
       if (Platform.isAndroid) {
         _wasInFullScreenBeforePiP = _isFullScreen;
         await videoPlayerController?.enablePictureInPicture(left: 0, top: 0, width: 0, height: 0);
-        enterFullScreen();
+        // Do not enterFullScreen() here — that pushes a Flutter fullscreen
+        // route via openFullscreen. With custom app fullscreen (NPL/details
+        // landscape), the BetterPlayer element is often disposed during the
+        // PiP/orientation rebuild and Navigator.of(context) null-checks.
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.pipStart));
         return;
       }
