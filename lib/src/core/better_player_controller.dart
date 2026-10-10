@@ -1034,9 +1034,16 @@ class BetterPlayerController {
         return;
       }
       if (Platform.isIOS) {
-        final RenderBox? renderBox = betterPlayerGlobalKey.currentContext!.findRenderObject() as RenderBox?;
-        if (renderBox == null) {
-          BetterPlayerUtils.log("Can't show PiP. RenderBox is null. Did you provide valid global"
+        final BuildContext? pipContext = betterPlayerGlobalKey.currentContext;
+        if (pipContext == null) {
+          BetterPlayerUtils.log("Can't show PiP. GlobalKey context is null.");
+          return;
+        }
+        final RenderBox? renderBox = pipContext.findRenderObject() as RenderBox?;
+        if (renderBox == null || !renderBox.hasSize ||
+            renderBox.size.width <= 0 ||
+            renderBox.size.height <= 0) {
+          BetterPlayerUtils.log("Can't show PiP. RenderBox is null or empty. Did you provide valid global"
               " key?");
           return;
         }
