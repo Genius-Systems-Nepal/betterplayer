@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -123,6 +124,24 @@ internal class BetterPlayer(
     private val customDefaultLoadControl: CustomDefaultLoadControl =
         customDefaultLoadControl ?: CustomDefaultLoadControl()
     private var lastSendBufferedPosition = 0L
+
+    /// Silent DRM session recreate when OEM KEY_EXPIRED cannot renew in-place.
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var drmAppContext: Context? = null
+    private var drmMediaUri: Uri? = null
+    private var drmLicenseUrl: String? = null
+    private var drmToken: String? = null
+    private var drmHeadersCached: Map<String, String>? = null
+    private var drmIsDash: Boolean = false
+    private var drmAdsUri: Uri? = null
+    private var drmFormatHint: String? = null
+    private var drmCacheKey: String? = null
+    private var drmUserAgent: String? = null
+    private var drmHttpHeaders: Map<String, String>? = null
+    private var drmDataSourceFactory: DataSource.Factory? = null
+    private var isSilentDrmRelicensing = false
+    private var silentDrmRelicenseCount = 0
+    private var lastSilentDrmRelicenseAtMs = 0L
 
     /// nerdstat
     var startNerdStat = false
@@ -301,6 +320,9 @@ internal class BetterPlayer(
     ) {
         this.key = key
         isInitialized = false
+        silentDrmRelicenseCount = 0
+        lastSilentDrmRelicenseAtMs = 0L
+        isSilentDrmRelicensing = false
         var adsUri: Uri? = null
         val uri = Uri.parse(dataSource)
         if (adsLink != null && !adsLink.isEmpty()) {
@@ -309,56 +331,11 @@ internal class BetterPlayer(
         var dataSourceFactory: DataSource.Factory?
         val userAgent = getUserAgent(headers)
 
-        val drmToken: String? = extraParams
+        val drmTokenValue: String? = extraParams
             ?.get("drm_token")
             ?.trim()
             ?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 
-        if (licenseUrl != null && licenseUrl.isNotEmpty()) {
-            val httpMediaDrmCallback =
-                HttpMediaDrmCallback(licenseUrl, DefaultHttpDataSource.Factory())
-            if (drmHeaders != null) {
-                for ((drmKey, drmValue) in drmHeaders) {
-                    httpMediaDrmCallback.setKeyRequestProperty(drmKey, drmValue)
-                }
-            }
-            if (Util.SDK_INT < 18) {
-                Log.e(TAG, "Protected content not supported on API levels below 18")
-                drmSessionManager = null
-            } else {
-                val drmSchemeUuid = Util.getDrmUuid("widevine")
-                if (drmSchemeUuid != null) {
-                    drmSessionManager = DefaultDrmSessionManager.Builder()
-                        .setUuidAndExoMediaDrmProvider(
-                            drmSchemeUuid
-                        ) { uuid: UUID? ->
-                            try {
-                                val mediaDrm = FrameworkMediaDrm.newInstance(uuid!!)
-                                // Force L3.
-                                mediaDrm.setPropertyString("securityLevel", "L3")
-                                return@setUuidAndExoMediaDrmProvider mediaDrm
-                            } catch (e: UnsupportedDrmException) {
-                                return@setUuidAndExoMediaDrmProvider DummyExoMediaDrm()
-                            }
-                        }
-                        .setMultiSession(false)
-                        .build(httpMediaDrmCallback)
-                }
-            }
-        } else if (clearKey != null && clearKey.isNotEmpty()) {
-            drmSessionManager = if (Util.SDK_INT < 18) {
-                Log.e(TAG, "Protected content not supported on API levels below 18")
-                null
-            } else {
-                DefaultDrmSessionManager.Builder()
-                    .setUuidAndExoMediaDrmProvider(
-                        C.CLEARKEY_UUID,
-                        FrameworkMediaDrm.DEFAULT_PROVIDER
-                    ).build(LocalMediaDrmCallback(clearKey.toByteArray()))
-            }
-        } else {
-            drmSessionManager = null
-        }
         if (uri.toString().contains("rtmp")) {
             dataSourceFactory = buildRtmp()
         } else if (isHTTP(uri)) {
@@ -376,28 +353,156 @@ internal class BetterPlayer(
         }
 
         val contentType = Util.inferContentType(uri, null)
-        if (!licenseUrl.isNullOrEmpty() && contentType == C.TYPE_DASH) {
-            val drmHelper = DrmHelper()
-            val drmMediaSource =
-                drmHelper.buildDrmMediaSource(uri, context, drmToken, drmHeaders, licenseUrl)
-            exoPlayer?.setMediaSource(drmMediaSource)
-        } else {
+        val hasLicense = !licenseUrl.isNullOrEmpty()
+        drmAppContext = context
+        drmMediaUri = uri
+        drmLicenseUrl = licenseUrl
+        drmToken = drmTokenValue
+        drmHeadersCached = drmHeaders
+        drmIsDash = hasLicense && contentType == C.TYPE_DASH
+        drmAdsUri = adsUri
+        drmFormatHint = formatHint
+        drmCacheKey = cacheKey
+        drmUserAgent = userAgent
+        drmHttpHeaders = headers
+        drmDataSourceFactory = dataSourceFactory
+
+        if (hasLicense) {
+            prepareDrmPlayback(/* fromSilentRelicense= */ false)
+        } else if (clearKey != null && clearKey.isNotEmpty()) {
+            drmSessionManager = if (Util.SDK_INT < 18) {
+                Log.e(TAG, "Protected content not supported on API levels below 18")
+                null
+            } else {
+                DefaultDrmSessionManager.Builder()
+                    .setUuidAndExoMediaDrmProvider(
+                        C.CLEARKEY_UUID,
+                        FrameworkMediaDrm.DEFAULT_PROVIDER
+                    ).build(LocalMediaDrmCallback(clearKey.toByteArray()))
+            }
             buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
-//            val mediaSource = buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
-//            if (overriddenDuration != 0L) {
-//                val clippingMediaSource = ClippingMediaSource(mediaSource, 0, overriddenDuration * 1000)
-//                exoPlayer?.setMediaSource(clippingMediaSource)
-//            } else {
-//                exoPlayer?.setMediaSource(mediaSource)
-//            }
+            exoPlayer?.prepare()
+            exoPlayer?.playWhenReady = true
+        } else {
+            drmSessionManager = null
+            buildMediaSource(uri, adsUri, dataSourceFactory, formatHint, cacheKey, context)
+            exoPlayer?.prepare()
+            exoPlayer?.playWhenReady = true
         }
 
-        exoPlayer?.prepare()
-        exoPlayer?.playWhenReady = true
         exoPlayer?.let {
             quanteecCore?.setPlayer(it);
         }
         result.success(null)
+    }
+
+    private fun buildWidevineDrmSessionManager(licenseUrl: String): DrmSessionManager? {
+        if (Util.SDK_INT < 18) {
+            Log.e(TAG, "Protected content not supported on API levels below 18")
+            return null
+        }
+        val httpMediaDrmCallback =
+            HttpMediaDrmCallback(
+                licenseUrl,
+                /* forceDefaultLicenseUrl= */ true,
+                DefaultHttpDataSource.Factory()
+            )
+        drmHeadersCached?.forEach { (drmKey, drmValue) ->
+            httpMediaDrmCallback.setKeyRequestProperty(drmKey, drmValue)
+        }
+        val drmSchemeUuid = Util.getDrmUuid("widevine") ?: return null
+        return DefaultDrmSessionManager.Builder()
+            .setUuidAndExoMediaDrmProvider(drmSchemeUuid) { uuid: UUID? ->
+                try {
+                    KeyExpiredRemappingExoMediaDrm.createWidevineL3(uuid!!) {
+                        requestSilentDrmRelicense("keyExpired")
+                    }
+                } catch (e: UnsupportedDrmException) {
+                    DummyExoMediaDrm()
+                }
+            }
+            .setMultiSession(true)
+            .build(httpMediaDrmCallback)
+    }
+
+    private fun prepareDrmPlayback(fromSilentRelicense: Boolean) {
+        val uri = drmMediaUri ?: return
+        val licenseUrl = drmLicenseUrl?.takeIf { it.isNotEmpty() } ?: return
+        val context = drmAppContext ?: return
+
+        if (drmIsDash) {
+            val drmMediaSource = DrmHelper().buildDrmMediaSource(
+                uri,
+                context,
+                drmToken,
+                drmHeadersCached,
+                licenseUrl
+            ) {
+                requestSilentDrmRelicense("keyExpired")
+            }
+            exoPlayer?.setMediaSource(drmMediaSource)
+        } else {
+            drmSessionManager = buildWidevineDrmSessionManager(licenseUrl)
+            val factory = drmDataSourceFactory ?: DefaultDataSource.Factory(context)
+            buildMediaSource(uri, drmAdsUri, factory, drmFormatHint, drmCacheKey, context)
+        }
+        if (fromSilentRelicense) {
+            // Avoid re-firing Flutter "initialized" during silent session recreate.
+            isInitialized = true
+        }
+        exoPlayer?.prepare()
+        exoPlayer?.playWhenReady = true
+    }
+
+    private fun requestSilentDrmRelicense(reason: String): Boolean {
+        if (drmLicenseUrl.isNullOrEmpty() || drmMediaUri == null) return false
+        val now = SystemClock.elapsedRealtime()
+        if (isSilentDrmRelicensing) return true
+        if (now - lastSilentDrmRelicenseAtMs < SILENT_DRM_RELICENSE_DEBOUNCE_MS) return true
+        if (silentDrmRelicenseCount >= MAX_SILENT_DRM_RELICENSES) {
+            Log.w(TAG, "Silent DRM relicense exhausted after $silentDrmRelicenseCount attempts")
+            return false
+        }
+        isSilentDrmRelicensing = true
+        silentDrmRelicenseCount++
+        lastSilentDrmRelicenseAtMs = now
+        Log.i(TAG, "Silent DRM relicense ($reason) attempt=$silentDrmRelicenseCount")
+        mainHandler.post {
+            try {
+                prepareDrmPlayback(/* fromSilentRelicense= */ true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Silent DRM relicense failed", e)
+            } finally {
+                isSilentDrmRelicensing = false
+            }
+        }
+        return true
+    }
+
+    private fun isDrmLicenseFailure(error: PlaybackException): Boolean {
+        if (error.errorCode == PlaybackException.ERROR_CODE_DRM_UNSPECIFIED ||
+            error.errorCode == PlaybackException.ERROR_CODE_DRM_LICENSE_EXPIRED ||
+            error.errorCode == PlaybackException.ERROR_CODE_DRM_SYSTEM_ERROR ||
+            error.errorCode == PlaybackException.ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_DRM_CONTENT_ERROR ||
+            error.errorCode == PlaybackException.ERROR_CODE_DRM_DISALLOWED_OPERATION
+        ) {
+            return true
+        }
+        var cause: Throwable? = error
+        while (cause != null) {
+            val text = "${cause.javaClass.name} ${cause.message}"
+            if (text.contains("ERROR_DRM_NO_LICENSE") ||
+                text.contains("ERROR_DRM_UNKNOWN") ||
+                text.contains("MediaDrmStateException") ||
+                text.contains("Crypto key not available") ||
+                text.contains("Failed to get key request")
+            ) {
+                return true
+            }
+            cause = cause.cause
+        }
+        return false
     }
 
     private fun buildRtmp(): DataSource.Factory {
@@ -712,6 +817,10 @@ internal class BetterPlayer(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                if (isDrmLicenseFailure(error) && requestSilentDrmRelicense("playerError")) {
+                    // Fresh DRM session recreate — do not surface error/loader to Flutter.
+                    return
+                }
                 eventSink.error("VideoError", "Video player had error $error", "${error.errorCode}")
             }
         })
@@ -1021,6 +1130,12 @@ internal class BetterPlayer(
 
         /** ~300 kbps — prefer lowest viable ladder rung at startup. */
         private const val ABR_INITIAL_BITRATE_ESTIMATE = 300_000L
+
+        /** Debounce OEM KEY_EXPIRED storms while a recreate is in flight. */
+        private const val SILENT_DRM_RELICENSE_DEBOUNCE_MS = 1500L
+
+        /** Enough for multi-hour live with ~2 min rental windows. */
+        private const val MAX_SILENT_DRM_RELICENSES = 120
 
         //Clear cache without accessing BetterPlayerCache.
         fun clearCache(context: Context?, result: MethodChannel.Result) {
