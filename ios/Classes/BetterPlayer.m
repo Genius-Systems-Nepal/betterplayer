@@ -12,6 +12,46 @@ static void* playbackBufferEmptyContext = &playbackBufferEmptyContext;
 static void* playbackBufferFullContext = &playbackBufferFullContext;
 static void* presentationSizeContext = &presentationSizeContext;
 
+static NSString* BetterPlayerNormalizeDrmToken(NSString* token) {
+    if (![token isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+    NSString* normalizedToken = [token stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (normalizedToken.length == 0) {
+        return nil;
+    }
+    if ([normalizedToken caseInsensitiveCompare:@"null"] == NSOrderedSame) {
+        return nil;
+    }
+    return normalizedToken;
+}
+
+static NSString* BetterPlayerNormalizeNonEmptyString(NSString* value) {
+    if (![value isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+    NSString* normalizedValue = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return normalizedValue.length > 0 ? normalizedValue : nil;
+}
+
+static BOOL BetterPlayerIsRemoteCertificateUrl(NSString* certificateUrl) {
+    NSString* lowerCertificateUrl = [certificateUrl lowercaseString];
+    return [lowerCertificateUrl hasPrefix:@"http://"] || [lowerCertificateUrl hasPrefix:@"https://"];
+}
+
+static NSString* BetterPlayerCertificateUrlPreview(NSString* certificateUrl) {
+    if (certificateUrl.length == 0) {
+        return @"(empty)";
+    }
+    if (BetterPlayerIsRemoteCertificateUrl(certificateUrl)) {
+        return certificateUrl;
+    }
+    const NSUInteger previewLength = MIN((NSUInteger)32, certificateUrl.length);
+    return [NSString stringWithFormat:@"%@... (%lu chars, inline base64)",
+            [certificateUrl substringToIndex:previewLength],
+            (unsigned long)certificateUrl.length];
+}
+
 
 #if TARGET_OS_IOS
 void (^__strong _Nonnull _restoreUserInterfaceForPIPStopCompletionHandler)(BOOL);
@@ -19,11 +59,16 @@ API_AVAILABLE(ios(9.0))
 AVPictureInPictureController *_pipController;
 #endif
 
+/** ~300 kbps startup peak so Auto ABR begins on a low rung, then unlocks. */
+static const double kAbrStartupPeakBitRate = 300000.0;
+
 @implementation BetterPlayer {
     NSTimer *nerdStatTimer;
     BetterPlayerVuDrmAssetsLoaderDelegate *_vuDrmAssetsloaderDelegate;
     BOOL nerdStatActive;
     double lastBitRate;
+    /// YES after Auto (0x0x0) until buffer is healthy and peak cap is cleared.
+    BOOL _autoAbrPendingUnlock;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame dictQuanteecConfig:(NSDictionary * _Nullable)dictQuanteecConfig {
@@ -33,27 +78,28 @@ AVPictureInPictureController *_pipController;
     _isPlaying = false;
     _disposed = false;
     _player = [[AVPlayer alloc] init];
-    
+
     //TODO: handle quanteec when package available
     /*if (dictQuanteecConfig) {
         [QuanteecHelper setupWithPlayer:_player dictQuanteecConfig: dictQuanteecConfig];
     }*/
-    
+
     BetterPlayerView *playerView = [[BetterPlayerView alloc] initWithFrame:CGRectZero];
     playerView.player = _player;
     _thisView = playerView;
-    
+
     [self setUpAdsLoader];
 //    _adTagUrlOrAdsResponse = @"https://ap-south-1-prod.ads.expresswifi.com/ads/video?h=720&w=600&api_key=BHPGAIUBVG4QIJIA&apid=3412547012154583&tag=app-10001-0002&skip=5";
     _isAdTagUrl = TRUE;
     _contentPlayhead = [[IMAAVPlayerContentPlayhead alloc] initWithAVPlayer:_player];
 //    [self requestAds];
-    
+
     _player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
     ///Fix for loading large videos
     if (@available(iOS 10.0, *)) {
         _player.automaticallyWaitsToMinimizeStalling = false;
     }
+
     self._observersAdded = false;
     return self;
 }
@@ -125,6 +171,20 @@ AVPictureInPictureController *_pipController;
             _eventSink(@{@"event" : @"bitrateUpdate", @"values" : [NSNumber numberWithInt:(int)lastBitRate]});
         }
     }
+    // Once AVPlayer reports a variant, lift the startup peak so ABR can upshift.
+    if (_autoAbrPendingUnlock && lastEventNumber > 0) {
+        [self unlockAutoAbrIfNeeded];
+    }
+}
+
+- (void)unlockAutoAbrIfNeeded {
+    if (!_autoAbrPendingUnlock) {
+        return;
+    }
+    _autoAbrPendingUnlock = NO;
+    if (_player.currentItem != nil) {
+        _player.currentItem.preferredPeakBitRate = 0;
+    }
 }
 
 - (void)clear {
@@ -134,6 +194,7 @@ AVPictureInPictureController *_pipController;
     _failedCount = 0;
     _key = nil;
     _adTagUrlOrAdsResponse = @"";
+    _autoAbrPendingUnlock = NO;
     if (_player.currentItem == nil) {
         return;
     }
@@ -278,16 +339,31 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     } else {
         AVURLAsset* asset = [AVURLAsset URLAssetWithURL:url
                                                 options:@{@"AVURLAssetHTTPHeaderFieldsKey" : headers}];
-        //if drmToken is passed, it is vu drm, else fallback to ez drm
-        if ((drmToken != (id)[NSNull null]) && ([drmToken length] > 0) && (certificateUrl != (id)[NSNull null])) {
-            NSURL * licenseNSURL = [[NSURL alloc] initWithString: licenseUrl];
-            _vuDrmAssetsloaderDelegate = [[BetterPlayerVuDrmAssetsLoaderDelegate alloc]initWithCertificateURL:certificateUrl licenseURL:licenseNSURL fairPlayToken:drmToken];
+        NSString* normalizedDrmToken = BetterPlayerNormalizeDrmToken(drmToken);
+        NSString* normalizedCertificateUrl = BetterPlayerNormalizeNonEmptyString(certificateUrl);
+        NSString* normalizedLicenseUrl = BetterPlayerNormalizeNonEmptyString(licenseUrl);
+        // VuDRM handles token-based providers (e.g. Lionsgate) and inline-certificate providers (e.g. SonyLiv ExpressPlay).
+        if (normalizedCertificateUrl != nil && normalizedLicenseUrl != nil &&
+            (normalizedDrmToken != nil || !BetterPlayerIsRemoteCertificateUrl(normalizedCertificateUrl))) {
+            BOOL isInlineCertificate = !BetterPlayerIsRemoteCertificateUrl(normalizedCertificateUrl);
+            NSLog(@"[BetterPlayer-FairPlay] Using VuDRM delegate (inlineCertificate=%@, hasToken=%@)",
+                  isInlineCertificate ? @"YES" : @"NO",
+                  normalizedDrmToken != nil ? @"YES" : @"NO");
+            NSLog(@"[BetterPlayer-FairPlay] certificateUrl=%@",
+                  BetterPlayerCertificateUrlPreview(normalizedCertificateUrl));
+            NSLog(@"[BetterPlayer-FairPlay] licenseUrl=%@", normalizedLicenseUrl);
+            NSURL * licenseNSURL = [[NSURL alloc] initWithString: normalizedLicenseUrl];
+            _vuDrmAssetsloaderDelegate = [[BetterPlayerVuDrmAssetsLoaderDelegate alloc]initWithCertificateURL:normalizedCertificateUrl licenseURL:licenseNSURL fairPlayToken:normalizedDrmToken];
             dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_DEFAULT, -1);
             dispatch_queue_t streamQueue = dispatch_queue_create("streamQueue", qos);
             [asset.resourceLoader setDelegate:_vuDrmAssetsloaderDelegate queue:streamQueue];
-        } else if (certificateUrl && certificateUrl != [NSNull null] && [certificateUrl length] > 0) {
-            NSURL * certificateNSURL = [[NSURL alloc] initWithString: certificateUrl];
-            NSURL * licenseNSURL = [[NSURL alloc] initWithString: licenseUrl];
+        } else if (normalizedCertificateUrl != nil && normalizedLicenseUrl != nil) {
+            NSLog(@"[BetterPlayer-FairPlay] Using EzDRM delegate");
+            NSLog(@"[BetterPlayer-FairPlay] certificateUrl=%@",
+                  BetterPlayerCertificateUrlPreview(normalizedCertificateUrl));
+            NSLog(@"[BetterPlayer-FairPlay] licenseUrl=%@", normalizedLicenseUrl);
+            NSURL * certificateNSURL = [[NSURL alloc] initWithString: normalizedCertificateUrl];
+            NSURL * licenseNSURL = [[NSURL alloc] initWithString: normalizedLicenseUrl];
             _loaderDelegate = [[BetterPlayerEzDrmAssetsLoaderDelegate alloc] init:certificateNSURL withLicenseURL:licenseNSURL];
             dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_DEFAULT, -1);
             dispatch_queue_t streamQueue = dispatch_queue_create("streamQueue", qos);
@@ -453,11 +529,14 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                 NSLog(item.error.debugDescription);
 
                 if (_eventSink != nil) {
+                    NSString *errorMessage = [NSString stringWithFormat:@"Failed to load video: %@ | Debug: %@",
+                                                                        [item.error localizedDescription],
+                                                                        item.error.debugDescription ?: @"No debug details available"];
+
                     _eventSink([FlutterError
-                                errorWithCode:@"VideoError"
-                                message:[@"Failed to load video: "
-                                         stringByAppendingString:[item.error localizedDescription]]
-                                details:nil]);
+                            errorWithCode:@"VideoError"
+                                  message:errorMessage
+                                  details:nil]);
                 }
                 break;
             case AVPlayerItemStatusUnknown:
@@ -468,6 +547,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         }
     } else if (context == playbackLikelyToKeepUpContext) {
         if ([[_player currentItem] isPlaybackLikelyToKeepUp]) {
+            [self unlockAutoAbrIfNeeded];
             [self updatePlayingState];
             if (_eventSink != nil) {
                 _eventSink(@{@"event" : @"bufferingEnd", @"key" : _key});
@@ -642,6 +722,18 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 
 - (void)setTrackParameters:(int) width: (int) height: (int)bitrate {
+    if (width == 0 && height == 0 && bitrate == 0) {
+        // Auto: start with a low peak so playback begins on a low rung, then unlock.
+        _autoAbrPendingUnlock = YES;
+        _player.currentItem.preferredPeakBitRate = kAbrStartupPeakBitRate;
+        if (@available
+        (iOS
+        11.0, *)) {
+            _player.currentItem.preferredMaximumResolution = CGSizeZero;
+        }
+        return;
+    }
+    _autoAbrPendingUnlock = NO;
     _player.currentItem.preferredPeakBitRate = bitrate;
     if (@available(iOS 11.0, *)) {
         if (width == 0 && height == 0){
