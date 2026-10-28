@@ -43,22 +43,29 @@ class BetterPlayerDashUtils {
 
     final representations = node.findAllElements('Representation');
 
-    representations.forEach((representation) {
-      final String? id = representation.getAttribute('id');
-      final int width = int.parse(representation.getAttribute('width') ?? '0');
-      final int height =
-          int.parse(representation.getAttribute('height') ?? '0');
-      final int bitrate =
-          int.parse(representation.getAttribute('bandwidth') ?? '0');
-      final int frameRate =
-          int.parse(representation.getAttribute('frameRate') ?? '0');
-      final String? codecs = representation.getAttribute('codecs');
-      final String? mimeType = MimeTypes.getMediaMimeType(codecs ?? '');
-      tracks.add(BetterPlayerAsmsTrack(
-          id, width, height, bitrate, frameRate, codecs, mimeType));
-    });
+    for (final representation in representations) {
+      try {
+        final String? id = representation.getAttribute('id');
+        final int width = int.tryParse(representation.getAttribute('width') ?? '0') ?? 0;
+        final int height = int.tryParse(representation.getAttribute('height') ?? '0') ?? 0;
+        final int bitrate = int.tryParse(representation.getAttribute('bandwidth') ?? '0') ?? 0;
+        final int frameRate = _parseFrameRate(representation.getAttribute('frameRate'));
+        final String? codecs = representation.getAttribute('codecs');
+        final String? mimeType = MimeTypes.getMediaMimeType(codecs ?? '');
+        tracks.add(BetterPlayerAsmsTrack(id, width, height, bitrate, frameRate, codecs, mimeType));
+      } catch (exception) {
+        BetterPlayerUtils.log("Exception on dash video representation parse: $exception");
+      }
+    }
 
     return tracks;
+  }
+
+  /// DASH may use integer (`24`) or fractional (`24/1`) frameRate values.
+  static int _parseFrameRate(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return 0;
+    final String head = raw.split('/').first.trim();
+    return int.tryParse(head) ?? double.tryParse(head)?.round() ?? 0;
   }
 
   static BetterPlayerAsmsAudioTrack parseAudio(XmlElement node, int index) {
