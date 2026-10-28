@@ -118,6 +118,10 @@ internal class BetterPlayer(
     private var exoPlayerEventListener: Player.Listener? = null
     private var bitmap: Bitmap? = null
     private var mediaSession: MediaSessionCompat? = null
+    /// Kept so PiP / MediaSession rebuilds still show Now Playing title & art.
+    private var notificationTitle: String? = null
+    private var notificationAuthor: String? = null
+    private var notificationImageUrl: String? = null
     private var drmSessionManager: DrmSessionManager? = null
     private val workManager: WorkManager
     private val workerObserverMap: HashMap<UUID, Observer<WorkInfo?>>
@@ -514,9 +518,17 @@ internal class BetterPlayer(
         imageUrl: String?, notificationChannelName: String?,
         activityName: String
     ) {
+        notificationTitle = title.trim().ifEmpty { null }
+        notificationAuthor = null
+        notificationImageUrl = imageUrl?.trim()?.ifEmpty { null }
+        bitmap = null
+
+        val displayTitle = notificationTitle ?: title
+        val artworkUrl = notificationImageUrl
+
         val mediaDescriptionAdapter: MediaDescriptionAdapter = object : MediaDescriptionAdapter {
             override fun getCurrentContentTitle(player: Player): String {
-                return title
+                return displayTitle
             }
 
             @SuppressLint("UnspecifiedImmutableFlag")
@@ -537,24 +549,25 @@ internal class BetterPlayer(
             }
 
             override fun getCurrentContentText(player: Player): String? {
-                return author
+                // Hide author/subtitle line on the media notification.
+                return null
             }
 
             override fun getCurrentLargeIcon(
                 player: Player,
                 callback: BitmapCallback
             ): Bitmap? {
-                if (imageUrl == null) {
+                if (artworkUrl.isNullOrBlank()) {
                     return null
                 }
                 if (bitmap != null) {
                     return bitmap
                 }
                 val imageWorkRequest = OneTimeWorkRequest.Builder(ImageWorker::class.java)
-                    .addTag(imageUrl)
+                    .addTag(artworkUrl)
                     .setInputData(
                         Data.Builder()
-                            .putString(BetterPlayerPlugin.URL_PARAMETER, imageUrl)
+                            .putString(BetterPlayerPlugin.URL_PARAMETER, artworkUrl)
                             .build()
                     )
                     .build()
@@ -570,8 +583,9 @@ internal class BetterPlayer(
                                 //Bitmap here is already processed and it's very small, so it won't
                                 //break anything.
                                 bitmap = BitmapFactory.decodeFile(filePath)
-                                bitmap?.let { bitmap ->
-                                    callback.onBitmap(bitmap)
+                                bitmap?.let { loaded ->
+                                    callback.onBitmap(loaded)
+                                    updateMediaSessionMetadata()
                                 }
                             }
                             if (state == WorkInfo.State.SUCCEEDED || state == WorkInfo.State.CANCELLED || state == WorkInfo.State.FAILED) {
@@ -629,6 +643,7 @@ internal class BetterPlayer(
                 setMediaSessionToken(it.sessionToken)
             }
         }
+        updateMediaSessionMetadata()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             refreshHandler = Handler(Looper.getMainLooper())
@@ -651,17 +666,43 @@ internal class BetterPlayer(
         }
         exoPlayerEventListener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                mediaSession?.setMetadata(
-                    MediaMetadataCompat.Builder()
-                        .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, getDuration())
-                        .build()
-                )
+                // Keep title/artwork — duration-only metadata was wiping Now Playing to "Unknown".
+                updateMediaSessionMetadata()
             }
         }
         exoPlayerEventListener?.let { exoPlayerEventListener ->
             exoPlayer?.addListener(exoPlayerEventListener)
         }
         exoPlayer?.seekTo(0)
+    }
+
+    /** Build Now Playing metadata for MediaSession / MediaSessionConnector. */
+    private fun buildNowPlayingMetadata(): MediaMetadataCompat? {
+        val title = notificationTitle
+        if (title.isNullOrBlank()) return null
+        val builder = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, getDuration())
+        val art = bitmap
+        if (art != null) {
+            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art)
+            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
+        } else {
+            val artUrl = notificationImageUrl
+            if (!artUrl.isNullOrBlank()) {
+                builder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artUrl)
+                builder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, artUrl)
+            }
+        }
+        return builder.build()
+    }
+
+    /** Push title / author / artwork into MediaSession (system shade + lock screen). */
+    private fun updateMediaSessionMetadata() {
+        val session = mediaSession ?: return
+        val metadata = buildNowPlayingMetadata() ?: return
+        session.setMetadata(metadata)
     }
 
     fun disposeRemoteNotifications() {
@@ -677,6 +718,9 @@ internal class BetterPlayer(
             playerNotificationManager?.setPlayer(null)
         }
         bitmap = null
+        notificationTitle = null
+        notificationAuthor = null
+        notificationImageUrl = null
     }
 
     private fun buildMediaSource(
@@ -976,8 +1020,17 @@ internal class BetterPlayer(
             })
             mediaSession.isActive = true
             val mediaSessionConnector = MediaSessionConnector(mediaSession)
+            // Prefer our Now Playing fields over ExoPlayer MediaItem (empty → "Unknown").
+            mediaSessionConnector.setMediaMetadataProvider {
+                buildNowPlayingMetadata()
+                    ?: MediaMetadataCompat.Builder()
+                        .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, getDuration())
+                        .build()
+            }
             mediaSessionConnector.setPlayer(exoPlayer)
             this.mediaSession = mediaSession
+            // PiP recreates the session — re-apply Now Playing so OEMs do not show "Unknown".
+            updateMediaSessionMetadata()
             return mediaSession
         }
         return null
