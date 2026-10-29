@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #import "BetterPlayer.h"
+#import <UIKit/UIKit.h>
 #import <better_player/better_player-Swift.h>
 
 static void* timeRangeContext = &timeRangeContext;
@@ -128,6 +129,9 @@ static const double kAbrStartupPeakBitRate = 300000.0;
     [center removeObserver:self name:UIApplicationWillResignActiveNotification object:nil];
     [center removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
     [center removeObserver:self name:UIApplicationDidEnterBackgroundNotification object:nil];
+    if (@available(iOS 11.0, *)) {
+        [center removeObserver:self name:UIScreenCapturedDidChangeNotification object:nil];
+    }
     [center addObserver:self
                selector:@selector(applicationWillResignActive:)
                    name:UIApplicationWillResignActiveNotification
@@ -140,6 +144,48 @@ static const double kAbrStartupPeakBitRate = 300000.0;
                selector:@selector(applicationDidEnterBackground:)
                    name:UIApplicationDidEnterBackgroundNotification
                  object:nil];
+    if (@available(iOS 11.0, *)) {
+        [center addObserver:self
+                   selector:@selector(screenCaptureDidChange:)
+                       name:UIScreenCapturedDidChangeNotification
+                     object:nil];
+        // Arm immediately if capture already active (e.g. mid-session).
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+        }
+    }
+}
+
+/// Stop playback and system PiP when the screen is recorded/mirrored (no FLAG_SECURE on iOS).
+- (void)forcePauseForScreenCapture {
+    if (_disposed) {
+        return;
+    }
+    _pipDesiredPlaying = NO;
+    _pipExpandingToApp = NO;
+    _pipResumeAfterStop = NO;
+    _isPlaying = false;
+    if (@available(iOS 9.0, *)) {
+        if (_pipController != nil && [_pipController isPictureInPictureActive]) {
+            self._pictureInPicture = NO;
+            [_pipController stopPictureInPicture];
+        }
+    }
+    if (_player != nil) {
+        [_player pause];
+    }
+    if (_eventSink != nil) {
+        _eventSink(@{@"event" : @"pause"});
+    }
+}
+
+- (void)screenCaptureDidChange:(NSNotification *)notification {
+    if (@available(iOS 11.0, *)) {
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+        }
+        // Capture ended: leave paused — user must resume.
+    }
 }
 #endif
 
@@ -708,6 +754,15 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (_isAdsPlaying == TRUE) {
         return;
     }
+#if TARGET_OS_IOS
+    if (@available(iOS 11.0, *)) {
+        // Do not start (or arm PiP) while screen capture is active.
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+            return;
+        }
+    }
+#endif
     _stalledCount = 0;
     _isStalledCheckStarted = false;
     _isPlaying = true;
@@ -725,6 +780,12 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         return;
     }
 #if TARGET_OS_IOS
+    if (@available(iOS 11.0, *)) {
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+            return;
+        }
+    }
     // Flutter/engine often pauses on inactive. If we are leaving the app while
     // playback is desired, start/keep system PiP instead of falling back to
     // audio-only Dynamic Island / Now Playing.
@@ -970,6 +1031,11 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         if (_disposed || !_player) {
             return;
         }
+        if (@available(iOS 11.0, *)) {
+            if (UIScreen.mainScreen.isCaptured) {
+                return;
+            }
+        }
         if (![AVPictureInPictureController isPictureInPictureSupported]) {
             return;
         }
@@ -1002,6 +1068,12 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)applicationWillResignActive:(NSNotification *)notification {
     _appInBackground = YES;
+    if (@available(iOS 11.0, *)) {
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+            return;
+        }
+    }
     if (_pipDesiredPlaying && [self isPipActive]) {
         [self keepPipPlayingIfNeeded];
         return;
@@ -1016,6 +1088,12 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)applicationDidEnterBackground:(NSNotification *)notification {
     _appInBackground = YES;
+    if (@available(iOS 11.0, *)) {
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+            return;
+        }
+    }
     if (_pipDesiredPlaying && [self isPipActive]) {
         [self keepPipPlayingIfNeeded];
     }
@@ -1051,6 +1129,12 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)startPictureInPictureNow {
     if (@available(iOS 9.0, *)) {
+        if (@available(iOS 11.0, *)) {
+            if (UIScreen.mainScreen.isCaptured) {
+                [self forcePauseForScreenCapture];
+                return;
+            }
+        }
         if (_pipController == nil) {
             [self bindPipToInlinePlayerLayer];
         }
