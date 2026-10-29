@@ -19,7 +19,6 @@ import android.provider.Settings
 import android.util.Log
 import android.util.LongSparseArray
 import android.util.Rational
-import android.view.WindowManager
 import com.jhomlala.better_player.BetterPlayerCache.releaseCache
 import io.flutter.embedding.engine.loader.FlutterLoader
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -48,7 +47,6 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     private var pipRunnable: Runnable? = null
     private var pipEntered = false
     private var pipEnterDeadline = 0L
-    private var pipClearedSecure = false
     /// When true (mini player), enter system PiP in [onUserLeaveHint] / auto-enter
     /// so Flutter lifecycle delays do not leave audio-only notification playback.
     private var pipEnterOnLeave = false
@@ -584,13 +582,15 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             }
             val entered = try {
                 act.enterPictureInPictureMode(params)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "enterPictureInPictureMode failed (FLAG_SECURE kept): ${e.message}")
                 false
             }
             if (entered || act.isInPictureInPictureMode) {
                 startPictureInPictureListenerTimer(player)
                 player.onPictureInPictureStatusChanged(true)
             } else {
+                Log.w(TAG, "PiP did not enter; FLAG_SECURE was not cleared")
                 restoreActivityAfterPip()
             }
         }
@@ -618,23 +618,13 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     }
 
     private fun prepareActivityForPip(act: Activity) {
-        // FLAG_SECURE blocks / immediately closes Android PiP. Always clear it
-        // before arming auto-enter or calling enterPictureInPictureMode — release
-        // builds hit this more often (ScreenRecording sets secure on page open).
-        val flags = act.window.attributes.flags
-        if (flags and WindowManager.LayoutParams.FLAG_SECURE != 0) {
-            pipClearedSecure = true
-        }
-        act.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // Keep FLAG_SECURE: PiP uses the same activity window; captures black out.
+        // Do not clear secure for mini arming or enterPictureInPictureMode.
         act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
     private fun restoreActivityAfterPip() {
         val act = activity ?: return
-        if (pipClearedSecure) {
-            act.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            pipClearedSecure = false
-        }
         // Keep UNSPECIFIED so SystemChrome can rotate after PiP. Restoring
         // SCREEN_ORIENTATION_PORTRAIT left the activity portrait while the
         // player still used landscape/fullscreen layout.
