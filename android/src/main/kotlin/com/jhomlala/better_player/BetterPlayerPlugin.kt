@@ -588,7 +588,6 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             }
             if (entered || act.isInPictureInPictureMode) {
                 startPictureInPictureListenerTimer(player)
-                player.onPictureInPictureStatusChanged(true)
             } else {
                 Log.w(TAG, "PiP did not enter; FLAG_SECURE was not cleared")
                 restoreActivityAfterPip()
@@ -598,6 +597,8 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
 
     private fun disablePictureInPicture(player: BetterPlayer) {
         stopPipHandler()
+        val act = activity
+        val wasInPip = act?.isInPictureInPictureMode == true
         pipEnterOnLeave = false
         pipLeavePlayer = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -611,7 +612,10 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             } catch (_: Exception) {
             }
         }
-        activity?.moveTaskToBack(false)
+        // Only move the task behind Home to exit an actual PiP window. Failed
+        // PiP-entry cleanup also calls this method; moving the task in that
+        // case unexpectedly backgrounds the whole app after screen lock.
+        if (wasInPip) act?.moveTaskToBack(false)
         player.onPictureInPictureStatusChanged(false)
         player.disposeMediaSession()
         restoreActivityAfterPip()
@@ -640,7 +644,10 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 val inPip = activity?.isInPictureInPictureMode == true
                 when {
                     inPip -> {
-                        pipEntered = true
+                        if (!pipEntered) {
+                            pipEntered = true
+                            player.onPictureInPictureStatusChanged(true)
+                        }
                         pipHandler?.postDelayed(pipRunnable!!, 250)
                     }
                     !pipEntered && SystemClock.uptimeMillis() < pipEnterDeadline -> {
