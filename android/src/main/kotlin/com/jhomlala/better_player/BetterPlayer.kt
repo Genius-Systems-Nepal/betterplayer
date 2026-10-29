@@ -625,8 +625,11 @@ internal class BetterPlayer(
             }
         }
 
+        // ExoPlayer 2.17 registers notification receivers without export flags;
+        // Android 13+ crashes unless we wrap the context (Quanteec pins 2.17).
+        val notificationContext = SafeReceiverContext(context.applicationContext)
         playerNotificationManager = PlayerNotificationManager.Builder(
-            context, NOTIFICATION_ID,
+            notificationContext, NOTIFICATION_ID,
             playerNotificationChannelName!!
         ).setMediaDescriptionAdapter(mediaDescriptionAdapter).build()
 

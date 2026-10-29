@@ -43,11 +43,16 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     private var currentNotificationTextureId: Long = -1
     private var currentNotificationDataSource: Map<String, Any?>? = null
     private var activity: Activity? = null
+    private var activityBinding: ActivityPluginBinding? = null
     private var pipHandler: Handler? = null
     private var pipRunnable: Runnable? = null
     private var pipEntered = false
     private var pipEnterDeadline = 0L
     private var pipClearedSecure = false
+    /// When true (mini player), enter system PiP in [onUserLeaveHint] / auto-enter
+    /// so Flutter lifecycle delays do not leave audio-only notification playback.
+    private var pipEnterOnLeave = false
+    private var pipLeavePlayer: BetterPlayer? = null
     override fun onAttachedToEngine(binding: FlutterPluginBinding) {
         val loader = FlutterLoader()
         flutterState = FlutterState(
@@ -84,16 +89,29 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityBinding = binding
+        binding.addOnUserLeaveHintListener {
+            // Must enter here — waiting on Flutter `inactive`/`paused` is too late
+            // and only the media notification keeps playing until the app is reopened.
+            tryEnterPictureInPictureOnLeave()
+        }
     }
 
     override fun onDetachedFromActivityForConfigChanges() {}
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityBinding = binding
+        binding.addOnUserLeaveHintListener {
+            tryEnterPictureInPictureOnLeave()
+        }
     }
 
     override fun onDetachedFromActivity() {
         activity = null
+        activityBinding = null
+        pipEnterOnLeave = false
+        pipLeavePlayer = null
     }
 
     private fun disposeAllPlayers() {
@@ -213,6 +231,11 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             }
             ENABLE_PICTURE_IN_PICTURE_METHOD -> {
                 enablePictureInPicture(player)
+                result.success(null)
+            }
+            SET_PIP_ENTER_ON_LEAVE_METHOD -> {
+                val enabled = call.argument<Boolean>("enabled") == true
+                setPipEnterOnLeave(enabled, player)
                 result.success(null)
             }
             DISABLE_PICTURE_IN_PICTURE_METHOD -> {
@@ -495,16 +518,76 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         }
     }
 
+    private fun setPipEnterOnLeave(enabled: Boolean, player: BetterPlayer?) {
+        pipEnterOnLeave = enabled
+        pipLeavePlayer = if (enabled) player else null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val act = activity ?: return
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // System enters PiP as soon as the user leaves — no Flutter round-trip.
+            builder.setAutoEnterEnabled(enabled)
+            builder.setSeamlessResizeEnabled(true)
+        }
+        try {
+            act.setPictureInPictureParams(builder.build())
+        } catch (_: Exception) {
+        }
+        if (enabled && player != null) {
+            try {
+                prepareActivityForPip(act)
+                player.setupMediaSession(flutterState!!.applicationContext)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun tryEnterPictureInPictureOnLeave() {
+        if (!pipEnterOnLeave) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val act = activity ?: return
+        if (act.isInPictureInPictureMode) return
+        val player = pipLeavePlayer ?: findActivePlayer() ?: return
+        enablePictureInPicture(player)
+    }
+
+    private fun findActivePlayer(): BetterPlayer? {
+        for (i in 0 until videoPlayers.size()) {
+            val player = videoPlayers.valueAt(i)
+            if (player != null) return player
+        }
+        return null
+    }
+
     private fun enablePictureInPicture(player: BetterPlayer) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val act = activity ?: return
+            if (act.isInPictureInPictureMode) {
+                startPictureInPictureListenerTimer(player)
+                player.onPictureInPictureStatusChanged(true)
+                return
+            }
             prepareActivityForPip(act)
             player.setupMediaSession(flutterState!!.applicationContext)
-            val params = PictureInPictureParams.Builder()
+            val builder = PictureInPictureParams.Builder()
                 .setAspectRatio(Rational(16, 9))
-                .build()
-            val entered = act.enterPictureInPictureMode(params)
-            if (entered) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Keep auto-enter armed while mini wants background PiP.
+                builder.setAutoEnterEnabled(pipEnterOnLeave)
+                builder.setSeamlessResizeEnabled(true)
+            }
+            val params = builder.build()
+            try {
+                act.setPictureInPictureParams(params)
+            } catch (_: Exception) {
+            }
+            val entered = try {
+                act.enterPictureInPictureMode(params)
+            } catch (_: Exception) {
+                false
+            }
+            if (entered || act.isInPictureInPictureMode) {
                 startPictureInPictureListenerTimer(player)
                 player.onPictureInPictureStatusChanged(true)
             } else {
@@ -515,6 +598,19 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
 
     private fun disablePictureInPicture(player: BetterPlayer) {
         stopPipHandler()
+        pipEnterOnLeave = false
+        pipLeavePlayer = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                activity?.setPictureInPictureParams(
+                    PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(16, 9))
+                        .setAutoEnterEnabled(false)
+                        .build()
+                )
+            } catch (_: Exception) {
+            }
+        }
         activity?.moveTaskToBack(false)
         player.onPictureInPictureStatusChanged(false)
         player.disposeMediaSession()
@@ -522,11 +618,14 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     }
 
     private fun prepareActivityForPip(act: Activity) {
+        // FLAG_SECURE blocks / immediately closes Android PiP. Always clear it
+        // before arming auto-enter or calling enterPictureInPictureMode — release
+        // builds hit this more often (ScreenRecording sets secure on page open).
         val flags = act.window.attributes.flags
         if (flags and WindowManager.LayoutParams.FLAG_SECURE != 0) {
             pipClearedSecure = true
-            act.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
+        act.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
@@ -675,6 +774,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val SET_TRACK_PARAMETERS_METHOD = "setTrackParameters"
         private const val SET_AUDIO_TRACK_METHOD = "setAudioTrack"
         private const val ENABLE_PICTURE_IN_PICTURE_METHOD = "enablePictureInPicture"
+        private const val SET_PIP_ENTER_ON_LEAVE_METHOD = "setPipEnterOnLeave"
         private const val DISABLE_PICTURE_IN_PICTURE_METHOD = "disablePictureInPicture"
         private const val IS_PICTURE_IN_PICTURE_SUPPORTED_METHOD = "isPictureInPictureSupported"
         private const val CHECK_PICTURE_IN_PICTURE_PERMISSION_METHOD = "checkPictureInPicturePermission"

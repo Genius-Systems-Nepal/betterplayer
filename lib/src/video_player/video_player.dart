@@ -662,6 +662,11 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
         textureId, top, left, width, height);
   }
 
+  /// Android mini → background: arm native onUserLeaveHint / auto-enter PiP.
+  Future<void> setPipEnterOnLeave(bool enabled) async {
+    await _videoPlayerPlatform.setPipEnterOnLeave(textureId, enabled);
+  }
+
   Future<void> disablePictureInPicture() async {
     await _videoPlayerPlatform.disablePictureInPicture(textureId);
   }

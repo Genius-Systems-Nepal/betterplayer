@@ -713,6 +713,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     _isPlaying = true;
     _pipDesiredPlaying = true;
     [self updatePlayingState];
+#if TARGET_OS_IOS
+    // Arm automatic video PiP before the user leaves the app.
+    [self ensurePipPreparedForAutomaticStart];
+#endif
 }
 
 - (void)pause {
@@ -721,12 +725,21 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         return;
     }
 #if TARGET_OS_IOS
-    // Flutter/engine often pauses on inactive; do not kill PiP background playback.
+    // Flutter/engine often pauses on inactive. If we are leaving the app while
+    // playback is desired, start/keep system PiP instead of falling back to
+    // audio-only Dynamic Island / Now Playing.
     UIApplicationState appState = [UIApplication sharedApplication].applicationState;
     BOOL leavingForeground = _appInBackground || appState != UIApplicationStateActive;
-    if (_pipDesiredPlaying && leavingForeground && [self isPipActive]) {
-        [self keepPipPlayingIfNeeded];
-        return;
+    if (_pipDesiredPlaying && leavingForeground) {
+        if ([self isPipActive]) {
+            [self keepPipPlayingIfNeeded];
+            return;
+        }
+        [self bindPipToInlinePlayerLayer];
+        [self startPictureInPictureNow];
+        if ([self isPipActive] || self._pictureInPicture) {
+            return;
+        }
     }
 #endif
     _isPlaying = false;
@@ -828,9 +841,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     self._pictureInPicture = pictureInPicture;
     if (@available(iOS 9.0, *)) {
         if (_pipController && self._pictureInPicture && ![_pipController isPictureInPictureActive]) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [_pipController startPictureInPicture];
-            });
+            [self startPictureInPictureNow];
         } else if (_pipController && !self._pictureInPicture && [_pipController isPictureInPictureActive]) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [_pipController stopPictureInPicture];
@@ -901,18 +912,68 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     }
 }
 
+- (BOOL)_isOverlayPipLayer:(AVPlayerLayer *)layer {
+    return layer != nil && _thisView != nil && layer != _thisView.playerLayer;
+}
+
+- (void)_removeOverlayPipLayerIfNeeded {
+    if ([self _isOverlayPipLayer:self._playerLayer]) {
+        [self._playerLayer removeFromSuperlayer];
+        self._playerLayer = nil;
+    }
+}
+
+/// Bind PiP to the inline platform-view AVPlayerLayer (not a second root overlay).
+/// Overlay layers caused duplicate video frames and broke mini → background PiP.
+- (void)bindPipToInlinePlayerLayer {
+    if (_disposed || !_player || !_thisView) {
+        return;
+    }
+    [self _removeOverlayPipLayerIfNeeded];
+    self._playerLayer = _thisView.playerLayer;
+    if (self._playerLayer.player != _player) {
+        self._playerLayer.player = _player;
+    }
+    [self setupPipController];
+}
+
 - (void)setupPipController {
     if (@available(iOS 9.0, *)) {
         // Playback category is required for PiP to continue in background.
         [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:nil];
         [[AVAudioSession sharedInstance] setActive: YES error: nil];
         [[UIApplication sharedApplication] beginReceivingRemoteControlEvents];
-        if (!_pipController && self._playerLayer && [AVPictureInPictureController isPictureInPictureSupported]) {
+        if (!self._playerLayer || ![AVPictureInPictureController isPictureInPictureSupported]) {
+            return;
+        }
+        // Controller is tied to one layer — recreate when the layer changes.
+        if (_pipController != nil && _pipController.playerLayer != self._playerLayer) {
+            _pipController.delegate = nil;
+            _pipController = nil;
+        }
+        if (!_pipController) {
             _pipController = [[AVPictureInPictureController alloc] initWithPlayerLayer:self._playerLayer];
             _pipController.delegate = self;
         }
+        if (@available(iOS 14.2, *)) {
+            // YouTube-like: system starts video PiP when leaving the app.
+            _pipController.canStartPictureInPictureAutomaticallyFromInline = YES;
+        }
     } else {
         // Fallback on earlier versions
+    }
+}
+
+/// Arm automatic video PiP from the inline player (no duplicate overlay layer).
+- (void)ensurePipPreparedForAutomaticStart {
+    if (@available(iOS 9.0, *)) {
+        if (_disposed || !_player) {
+            return;
+        }
+        if (![AVPictureInPictureController isPictureInPictureSupported]) {
+            return;
+        }
+        [self bindPipToInlinePlayerLayer];
     }
 }
 
@@ -943,6 +1004,13 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     _appInBackground = YES;
     if (_pipDesiredPlaying && [self isPipActive]) {
         [self keepPipPlayingIfNeeded];
+        return;
+    }
+    // Last chance before suspend: start video PiP from the inline layer
+    // (Flutter inactive is often too late for a method-channel round-trip).
+    if (_pipDesiredPlaying && _isPlaying) {
+        [self bindPipToInlinePlayerLayer];
+        [self startPictureInPictureNow];
     }
 }
 
@@ -955,52 +1023,76 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
     _appInBackground = NO;
+    // Drop any leftover root overlay from older PiP paths (dual-frame bug).
+    [self _removeOverlayPipLayerIfNeeded];
     if (_pipDesiredPlaying && [self isPipActive]) {
         [self keepPipPlayingIfNeeded];
     }
 }
 
 - (void) enablePictureInPicture: (CGRect) frame{
-    [self disablePictureInPicture];
-    [self usePlayerLayer:frame];
+    // Frame is unused — PiP must use the inline platform-view layer. Creating a
+    // second root AVPlayerLayer stacked a "big" video over the mini player.
+    (void)frame;
+    BOOL desiredPlaying = _pipDesiredPlaying || _isPlaying;
+    if (desiredPlaying) {
+        _pipDesiredPlaying = YES;
+        _isPlaying = YES;
+    }
+    [self bindPipToInlinePlayerLayer];
+    [self startPictureInPictureNow];
 }
 
 - (void)usePlayerLayer: (CGRect) frame
 {
-    if( _player )
-    {
-        // Create new controller passing reference to the AVPlayerLayer
-        self._playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
-        UIViewController* vc = [[[UIApplication sharedApplication] keyWindow] rootViewController];
-        self._playerLayer.frame = frame;
-        self._playerLayer.needsDisplayOnBoundsChange = YES;
-        //  [self._playerLayer addObserver:self forKeyPath:readyForDisplayKeyPath options:NSKeyValueObservingOptionNew context:nil];
-        [vc.view.layer addSublayer:self._playerLayer];
-        vc.view.layer.needsDisplayOnBoundsChange = YES;
-        if (@available(iOS 9.0, *)) {
-            _pipController = NULL;
+    (void)frame;
+    [self enablePictureInPicture:CGRectZero];
+}
+
+- (void)startPictureInPictureNow {
+    if (@available(iOS 9.0, *)) {
+        if (_pipController == nil) {
+            [self bindPipToInlinePlayerLayer];
         }
-        [self setupPipController];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            [self setPictureInPicture:true];
-        });
+        if (_pipController == nil) {
+            return;
+        }
+        self._pictureInPicture = YES;
+        if (!_pipController.isPictureInPictureActive) {
+            if (_pipController.isPictureInPicturePossible) {
+                [_pipController startPictureInPicture];
+            } else {
+                // Layer may need one layout pass before possible == YES.
+                // _pipController is file-scope (not an ivar) — do not use self->.
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (_pipController != nil &&
+                        !_pipController.isPictureInPictureActive &&
+                        _pipController.isPictureInPicturePossible) {
+                        [_pipController startPictureInPicture];
+                    }
+                });
+            }
+        }
     }
 }
 
 - (void)disablePictureInPicture
 {
+    [self disablePictureInPictureKeepIntent:NO];
+}
+
+- (void)disablePictureInPictureKeepIntent:(BOOL)keepIntent
+{
     // Must pass NO to stop an active PiP session. Passing YES was a long-standing
     // bug that left system PiP running and blocked new playback handoff.
     BOOL resumeAfterStop = _pipResumeAfterStop;
+    BOOL desiredPlaying = _pipDesiredPlaying || _isPlaying;
     _pipStopping = YES;
     [self setPictureInPicture:false];
-    if (__playerLayer){
-        [self._playerLayer removeFromSuperlayer];
-        self._playerLayer = nil;
-        if (_eventSink != nil) {
-            _eventSink(@{@"event" : @"pipStop"});
-        }
+    // Never remove the inline BetterPlayerView layer — only leftover overlays.
+    [self _removeOverlayPipLayerIfNeeded];
+    if (!keepIntent && _eventSink != nil) {
+        _eventSink(@{@"event" : @"pipStop"});
     }
     if (resumeAfterStop) {
         // Expanding PiP → in-app: keep the same playing state.
@@ -1015,6 +1107,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         if (_eventSink != nil) {
             _eventSink(@{@"event" : @"play"});
         }
+    } else if (keepIntent) {
+        _pipDesiredPlaying = desiredPlaying;
+        _isPlaying = desiredPlaying;
     } else {
         _pipDesiredPlaying = NO;
     }
@@ -1039,14 +1134,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     _pipStopping = NO;
     _pipExpandingToApp = NO;
     _pipResumeAfterStop = NO;
-    // PIP_OVERLAY_FIX
-    // Keep the layer in the hierarchy (required for stable iOS PiP) but move it
-    // off-screen so it does not paint over other tabs/pages. Do not remove or
-    // hide the layer — that closes or freezes system PiP.
-    if (self._playerLayer != nil) {
+    // Only nudge leftover overlay layers off-screen — never move the inline view.
+    if ([self _isOverlayPipLayer:self._playerLayer]) {
         self._playerLayer.frame = CGRectMake(-3.0, -3.0, 1.0, 1.0);
     }
-    // END PIP_OVERLAY_FIX
     [self keepPipPlayingIfNeeded];
 }
 
@@ -1064,7 +1155,8 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 }
 
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController failedToStartPictureInPictureWithError:(NSError *)error {
-
+    [self _removeOverlayPipLayerIfNeeded];
+    self._pictureInPicture = NO;
 }
 
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL))completionHandler {
