@@ -1041,9 +1041,51 @@ internal class BetterPlayer(
     }
 
     fun onPictureInPictureStatusChanged(inPip: Boolean) {
+        if (inPip) {
+            // Background/release OEMs often show a blank first PiP frame until a
+            // resize (user double-tap). Rebind the video surface immediately.
+            refreshVideoSurfaceForPip()
+        }
         val event: MutableMap<String, Any> = HashMap()
         event["event"] = if (inPip) "pipStart" else "pipStop"
         eventSink.success(event)
+    }
+
+    /**
+     * Re-attach ExoPlayer to the Flutter [SurfaceTexture] so the first PiP
+     * composite shows video (release / mini→background enter race on some devices).
+     */
+    fun refreshVideoSurfaceForPip() {
+        try {
+            val player = exoPlayer ?: return
+            val texture = textureEntry.surfaceTexture()
+            val video = player.videoSize
+            val metrics = activity.resources.displayMetrics
+            // Prefer decoded size; fall back to display so mini→PiP is not stuck
+            // on a tiny buffer from the clipped mini layout.
+            val bufW = when {
+                video.width > 0 -> video.width
+                else -> metrics.widthPixels
+            }
+            val bufH = when {
+                video.height > 0 -> video.height
+                else -> metrics.heightPixels
+            }
+            if (bufW > 0 && bufH > 0) {
+                texture.setDefaultBufferSize(bufW, bufH)
+            }
+            val nextSurface = surface?.takeIf { it.isValid } ?: Surface(texture).also {
+                surface?.release()
+                surface = it
+            }
+            player.setVideoSurface(null)
+            player.setVideoSurface(nextSurface)
+            if (!player.playWhenReady) {
+                player.playWhenReady = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "refreshVideoSurfaceForPip failed: ${e.message}")
+        }
     }
 
     fun disposeMediaSession() {

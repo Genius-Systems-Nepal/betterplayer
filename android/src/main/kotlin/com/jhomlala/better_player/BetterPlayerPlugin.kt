@@ -564,6 +564,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             if (act.isInPictureInPictureMode) {
                 startPictureInPictureListenerTimer(player)
                 player.onPictureInPictureStatusChanged(true)
+                schedulePipFirstFrameRefresh(player)
                 return
             }
             prepareActivityForPip(act)
@@ -647,6 +648,9 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                         if (!pipEntered) {
                             pipEntered = true
                             player.onPictureInPictureStatusChanged(true)
+                            // Force a PiP bounds refresh after enter — same effect
+                            // as OEM double-tap resize that makes blank video appear.
+                            schedulePipFirstFrameRefresh(player)
                         }
                         pipHandler?.postDelayed(pipRunnable!!, 250)
                     }
@@ -663,6 +667,47 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             }
             pipHandler?.postDelayed(pipRunnable!!, 400)
         }
+    }
+
+    /**
+     * Some devices (esp. release + background enter) leave the first PiP frame
+     * blank until the user double-taps (size toggle). Nudge aspect ratio and
+     * rebind the video surface a few times while still in PiP.
+     */
+    private fun schedulePipFirstFrameRefresh(player: BetterPlayer) {
+        val act = activity ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            player.refreshVideoSurfaceForPip()
+            return
+        }
+        val main = Handler(Looper.getMainLooper())
+        fun applyAspect(w: Int, h: Int) {
+            if (activity?.isInPictureInPictureMode != true) return
+            try {
+                val builder = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(w, h))
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    builder.setAutoEnterEnabled(pipEnterOnLeave)
+                    builder.setSeamlessResizeEnabled(true)
+                }
+                act.setPictureInPictureParams(builder.build())
+            } catch (_: Exception) {
+            }
+            player.refreshVideoSurfaceForPip()
+        }
+        // Immediate rebind, then aspect nudges + restores (triggers the same
+        // redraw path as OEM double-tap resize). Extra passes help mini→PiP
+        // after Flutter expands the texture from the clipped mini shell.
+        player.refreshVideoSurfaceForPip()
+        main.postDelayed({ applyAspect(161, 90) }, 50)
+        main.postDelayed({ applyAspect(16, 9) }, 160)
+        main.postDelayed({ applyAspect(160, 91) }, 320)
+        main.postDelayed({ applyAspect(16, 9) }, 450)
+        main.postDelayed({
+            if (activity?.isInPictureInPictureMode == true) {
+                player.refreshVideoSurfaceForPip()
+            }
+        }, 700)
     }
 
     private fun dispose(player: BetterPlayer, textureId: Long) {
