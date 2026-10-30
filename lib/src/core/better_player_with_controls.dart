@@ -258,6 +258,8 @@ class _BetterPlayerVideoFitWidgetState
       }
       _initialized = false;
       _initialize();
+    } else if (oldWidget.boxFit != widget.boxFit) {
+      setState(() {});
     }
   }
 
@@ -299,16 +301,16 @@ class _BetterPlayerVideoFitWidgetState
   @override
   Widget build(BuildContext context) {
     if (_initialized && _started) {
+      final Size natural = controller!.value.size ?? Size.zero;
       return Center(
         child: ClipRect(
-          child: Container(
-            width: double.infinity,
-            height: double.infinity,
+          child: SizedBox.expand(
             child: FittedBox(
               fit: widget.boxFit,
+              clipBehavior: Clip.hardEdge,
               child: SizedBox(
-                width: controller!.value.size?.width ?? 0,
-                height: controller!.value.size?.height ?? 0,
+                width: natural.width,
+                height: natural.height,
                 child: VideoPlayer(controller),
               ),
             ),

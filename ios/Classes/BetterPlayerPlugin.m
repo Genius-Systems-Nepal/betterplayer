@@ -365,6 +365,12 @@ bool _remoteCommandsInitialized = false;
                 headers = @{};
             }
 
+            NSDictionary * _Nullable
+            cmcdConfig = nil;
+            if (dataSource[@"cmcdConfig"] != [NSNull null] && [dataSource[@"cmcdConfig"] isKindOfClass:[NSDictionary class]]) {
+                cmcdConfig = dataSource[@"cmcdConfig"];
+            }
+
             if (assetArg) {
                 NSString* assetPath;
                 NSString* package = dataSource[@"package"];
@@ -375,7 +381,7 @@ bool _remoteCommandsInitialized = false;
                 }
                 [player setDataSourceAsset:assetPath withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration withDrmToken:drmToken];
             } else if (uriArg) {
-                [player setDataSourceURL:[NSURL URLWithString:uriArg] withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl withHeaders:headers withCache: useCache cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration videoExtension: videoExtension adsUrl: adsUrl withDrmToken:drmToken];
+                [player setDataSourceURL:[NSURL URLWithString:uriArg] withKey:key withCertificateUrl:certificateUrl withLicenseUrl:licenseUrl withHeaders:headers withCache:useCache cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration videoExtension:videoExtension adsUrl:adsUrl withDrmToken:drmToken cmcdConfig:cmcdConfig];
             } else {
                 result(FlutterMethodNotImplemented);
             }

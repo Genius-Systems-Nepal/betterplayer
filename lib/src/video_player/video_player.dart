@@ -120,41 +120,51 @@ class VideoPlayerValue {
     return aspectRatio;
   }
 
+  /// Sentinel so [copyWith] can clear [errorDescription] / [errorCode].
+  static const Object _unset = Object();
+
   /// Returns a new instance that has the same values as this current instance,
-  /// except for any overrides passed in as arguments to [copyWidth].
-  VideoPlayerValue copyWith(
-      {Duration? duration,
-      Size? size,
-      Duration? position,
-      DateTime? absolutePosition,
-      List<DurationRange>? buffered,
-      bool? isPlaying,
-      bool? isLooping,
-      bool? isBuffering,
-      double? volume,
-      String? errorDescription,
-      double? speed,
-      bool? isPip,
-      String? nerdStatValue,
-      int? bitrateValue,
-      String? errorCode}) {
+  /// except for any overrides passed in as arguments to [copyWith].
+  /// Pass `errorDescription: null` (or [clearError]) to clear a prior error —
+  /// `errorDescription ?? this.errorDescription` cannot clear once set.
+  VideoPlayerValue copyWith({
+    Duration? duration,
+    Size? size,
+    Duration? position,
+    DateTime? absolutePosition,
+    List<DurationRange>? buffered,
+    bool? isPlaying,
+    bool? isLooping,
+    bool? isBuffering,
+    double? volume,
+    Object? errorDescription = _unset,
+    double? speed,
+    bool? isPip,
+    String? nerdStatValue,
+    int? bitrateValue,
+    Object? errorCode = _unset,
+  }) {
     return VideoPlayerValue(
-        duration: duration ?? this.duration,
-        size: size ?? this.size,
-        position: position ?? this.position,
-        absolutePosition: absolutePosition ?? this.absolutePosition,
-        buffered: buffered ?? this.buffered,
-        isPlaying: isPlaying ?? this.isPlaying,
-        isLooping: isLooping ?? this.isLooping,
-        isBuffering: isBuffering ?? this.isBuffering,
-        volume: volume ?? this.volume,
-        speed: speed ?? this.speed,
-        errorDescription: errorDescription ?? this.errorDescription,
-        isPip: isPip ?? this.isPip,
-        nerdStatValue: nerdStatValue ?? this.nerdStatValue,
-        bitrateValue: bitrateValue ?? this.bitrateValue,
-        errorCode: errorCode ?? this.errorCode);
+      duration: duration ?? this.duration,
+      size: size ?? this.size,
+      position: position ?? this.position,
+      absolutePosition: absolutePosition ?? this.absolutePosition,
+      buffered: buffered ?? this.buffered,
+      isPlaying: isPlaying ?? this.isPlaying,
+      isLooping: isLooping ?? this.isLooping,
+      isBuffering: isBuffering ?? this.isBuffering,
+      volume: volume ?? this.volume,
+      speed: speed ?? this.speed,
+      errorDescription: identical(errorDescription, _unset) ? this.errorDescription : errorDescription as String?,
+      isPip: isPip ?? this.isPip,
+      nerdStatValue: nerdStatValue ?? this.nerdStatValue,
+      bitrateValue: bitrateValue ?? this.bitrateValue,
+      errorCode: identical(errorCode, _unset) ? this.errorCode : (errorCode as String? ?? '0'),
+    );
   }
+
+  /// Drop sticky error so auto-retry / re-setup can succeed.
+  VideoPlayerValue clearError() => copyWith(errorDescription: null, errorCode: '0');
 
   @override
   String toString() {
@@ -285,16 +295,23 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     }
 
     void errorListener(Object object) {
+      if (_isDisposed) return;
       if (object is PlatformException) {
         final PlatformException e = object;
-        value = value.copyWith(errorDescription: '${e.message} ${e.details}');
         value = value.copyWith(
-            errorDescription: '${e.message} ${e.details}',
-            errorCode: e.details);
+          errorDescription: '${e.message} ${e.details}',
+          errorCode: '${e.details ?? e.code}',
+          isPlaying: false,
+        );
       } else {
-        value.copyWith(errorDescription: object.toString());
+        value = value.copyWith(
+          errorDescription: object.toString(),
+          isPlaying: false,
+        );
       }
       _timer?.cancel();
+      // Mid-playback errors: do not completeError — that surfaces as an
+      // unhandled PlatformException when initialize already finished.
       if (!_initializingCompleter.isCompleted) {
         _initializingCompleter.completeError(object);
       }
@@ -367,6 +384,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     String? activityName,
     String? clearKey,
     String? videoExtension,
+    Map<String, dynamic>? cmcdConfig,
   }) {
     return _setDataSource(
       DataSource(
@@ -392,6 +410,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
         activityName: activityName,
         clearKey: clearKey,
         videoExtension: videoExtension,
+        cmcdConfig: cmcdConfig,
       ),
     );
   }

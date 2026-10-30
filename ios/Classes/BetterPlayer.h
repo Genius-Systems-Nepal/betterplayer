@@ -56,7 +56,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setMixWithOthers:(bool)mixWithOthers;
 - (void)seekTo:(int)location;
 - (void)setDataSourceAsset:(NSString*)asset withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration withDrmToken: (NSString *)drmToken;
-- (void)setDataSourceURL:(NSURL*)url withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders:(NSDictionary*)headers withCache:(BOOL)useCache cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration videoExtension: (NSString*) videoExtension adsUrl: (NSString*) adsUrl withDrmToken: (NSString *)drmToken ;
+
+- (void)setDataSourceURL:(NSURL *)url withKey:(NSString *)key withCertificateUrl:(NSString *)certificateUrl withLicenseUrl:(NSString *)licenseUrl withHeaders:(NSDictionary *)headers withCache:(BOOL)useCache cacheKey:(NSString *)cacheKey cacheManager:(CacheManager *)cacheManager overriddenDuration:(int)overriddenDuration videoExtension:(NSString *)videoExtension adsUrl:(NSString *)adsUrl withDrmToken:(NSString *)drmToken cmcdConfig:(NSDictionary * _Nullable)cmcdConfig;
 - (void)setVolume:(double)volume;
 - (void)setSpeed:(double)speed result:(FlutterResult)result;
 - (void) setAudioTrack:(NSString*) name index:(int) index;
