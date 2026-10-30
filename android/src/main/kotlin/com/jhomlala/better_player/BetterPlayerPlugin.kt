@@ -88,6 +88,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
         activityBinding = binding
+        instance = this
         binding.addOnUserLeaveHintListener {
             // Must enter here — waiting on Flutter `inactive`/`paused` is too late
             // and only the media notification keeps playing until the app is reopened.
@@ -100,16 +101,43 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
         activityBinding = binding
+        instance = this
         binding.addOnUserLeaveHintListener {
             tryEnterPictureInPictureOnLeave()
         }
     }
 
     override fun onDetachedFromActivity() {
+        if (instance === this) {
+            instance = null
+        }
         activity = null
         activityBinding = null
         pipEnterOnLeave = false
         pipLeavePlayer = null
+    }
+
+    /**
+     * Called from [np.com.nettv.MainActivity] when Activity PiP mode changes so
+     * Flutter gets [pipStart]/[pipStop] immediately (not only after the poll timer).
+     */
+    private fun handleActivityPictureInPictureModeChanged(inPip: Boolean) {
+        val player = pipLeavePlayer ?: findActivePlayer() ?: return
+        if (inPip) {
+            // Notify Dart immediately so player-only UI covers tabs before buffer/error.
+            player.onPictureInPictureStatusChanged(true)
+            schedulePipFirstFrameRefresh(player)
+            if (!pipEntered) {
+                startPictureInPictureListenerTimer(player)
+            }
+        } else {
+            if (activity?.isInPictureInPictureMode == true) return
+            player.onPictureInPictureStatusChanged(false)
+            player.disposeMediaSession()
+            restoreActivityAfterPip()
+            stopPipHandler()
+            pipEntered = false
+        }
     }
 
     private fun disposeAllPlayers() {
@@ -243,6 +271,14 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             IS_PICTURE_IN_PICTURE_SUPPORTED_METHOD -> result.success(
                 isPictureInPictureSupported()
             )
+            IS_ACTIVITY_IN_PICTURE_IN_PICTURE_MODE_METHOD -> {
+                val inPip = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    activity?.isInPictureInPictureMode == true
+                } else {
+                    false
+                }
+                result.success(inPip)
+            }
             CHECK_PICTURE_IN_PICTURE_PERMISSION_METHOD -> result.success(
                 hasPipPermission(flutterState!!.applicationContext)
             )
@@ -642,7 +678,15 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             pipEnterDeadline = SystemClock.uptimeMillis() + 2000
             pipHandler = Handler(Looper.getMainLooper())
             pipRunnable = Runnable {
-                val inPip = activity?.isInPictureInPictureMode == true
+                val act = activity
+                // activity==null is unknown (detach/config) — do NOT emit pipStop;
+                // a false pipStop makes Flutter restore mini/tabs into the PiP window.
+                if (act == null) {
+                    pipHandler?.postDelayed(pipRunnable!!, 250)
+                    return@Runnable
+                }
+                val inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
+                    act.isInPictureInPictureMode
                 when {
                     inPip -> {
                         if (!pipEntered) {
@@ -797,6 +841,19 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         const val HEADER_PARAMETER = "header_"
         const val FILE_PATH_PARAMETER = "filePath"
         const val ACTIVITY_NAME_PARAMETER = "activityName"
+        @JvmStatic
+        @Volatile
+        private var instance: BetterPlayerPlugin? = null
+
+        /**
+         * Forward Activity [onPictureInPictureModeChanged] so Dart `isPip` flips
+         * as soon as the system enters/exits PiP (covers mini auto-enter races).
+         */
+        @JvmStatic
+        fun onActivityPictureInPictureModeChanged(inPip: Boolean) {
+            instance?.handleActivityPictureInPictureModeChanged(inPip)
+        }
+
         const val MIN_BUFFER_MS = "minBufferMs"
         const val MAX_BUFFER_MS = "maxBufferMs"
         const val BUFFER_FOR_PLAYBACK_MS = "bufferForPlaybackMs"
@@ -819,6 +876,8 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val SET_PIP_ENTER_ON_LEAVE_METHOD = "setPipEnterOnLeave"
         private const val DISABLE_PICTURE_IN_PICTURE_METHOD = "disablePictureInPicture"
         private const val IS_PICTURE_IN_PICTURE_SUPPORTED_METHOD = "isPictureInPictureSupported"
+        private const val IS_ACTIVITY_IN_PICTURE_IN_PICTURE_MODE_METHOD =
+            "isActivityInPictureInPictureMode"
         private const val CHECK_PICTURE_IN_PICTURE_PERMISSION_METHOD = "checkPictureInPicturePermission"
         private const val OPEN_PICTURE_IN_PICTURE_PERMISSION_SETTINGS_METHOD = "openPictureInPicturePermissionSettings"
         private const val SET_MIX_WITH_OTHERS_METHOD = "setMixWithOthers"

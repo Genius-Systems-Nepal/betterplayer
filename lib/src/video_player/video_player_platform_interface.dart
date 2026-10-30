@@ -160,6 +160,12 @@ abstract class VideoPlayerPlatform {
         'isPictureInPictureEnabled() has not been implemented.');
   }
 
+  /// Android: true only when the Activity is currently in system PiP.
+  Future<bool?> isActivityInPictureInPictureMode(int? textureId) {
+    throw UnimplementedError(
+        'isActivityInPictureInPictureMode() has not been implemented.');
+  }
+
   Future<bool?> checkPipPermission(int? textureId) {
     throw UnimplementedError('checkPipPermission() has not been implemented.');
   }

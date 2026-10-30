@@ -340,6 +340,16 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
+  Future<bool?> isActivityInPictureInPictureMode(int? textureId) {
+    return _channel.invokeMethod<bool>(
+      'isActivityInPictureInPictureMode',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
   Future<bool?> checkPipPermission(int? textureId) {
     return _channel.invokeMethod<bool>(
       'checkPictureInPicturePermission',

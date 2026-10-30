@@ -685,6 +685,14 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     return _videoPlayerPlatform.isPictureInPictureEnabled(_textureId);
   }
 
+  /// Android Activity.isInPictureInPictureMode (not the video isPip event).
+  Future<bool?> isActivityInPictureInPictureMode() async {
+    if (_textureId == null) {
+      return false;
+    }
+    return _videoPlayerPlatform.isActivityInPictureInPictureMode(_textureId);
+  }
+
   Future<bool?> checkPipPermission() async {
     if (_textureId == null) {
       return false;
