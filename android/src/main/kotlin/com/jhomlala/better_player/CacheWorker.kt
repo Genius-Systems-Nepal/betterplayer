@@ -34,10 +34,14 @@ class CacheWorker(
             val maxCacheFileSize = data.getLong(BetterPlayerPlugin.MAX_CACHE_FILE_SIZE_PARAMETER, 0)
             val headers: MutableMap<String, String> = HashMap()
             for (key in data.keyValueMap.keys) {
-                if (key.contains(BetterPlayerPlugin.HEADER_PARAMETER)) {
-                    val keySplit =
-                        key.split(BetterPlayerPlugin.HEADER_PARAMETER.toRegex()).toTypedArray()[0]
-                    headers[keySplit] = Objects.requireNonNull(data.keyValueMap[key]) as String
+                if (key.startsWith(BetterPlayerPlugin.HEADER_PARAMETER)) {
+                    val headerName =
+                        key.removePrefix(BetterPlayerPlugin.HEADER_PARAMETER)
+                    if (headerName.isEmpty()) {
+                        continue
+                    }
+                    val value = data.keyValueMap[key] as? String ?: continue
+                    headers[headerName] = value
                 }
             }
             val uri = Uri.parse(url)

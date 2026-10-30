@@ -11,6 +11,47 @@ static void* playbackLikelyToKeepUpContext = &playbackLikelyToKeepUpContext;
 static void* playbackBufferEmptyContext = &playbackBufferEmptyContext;
 static void* playbackBufferFullContext = &playbackBufferFullContext;
 static void* presentationSizeContext = &presentationSizeContext;
+static void *timeControlStatusContext = &timeControlStatusContext;
+
+static NSString* BetterPlayerNormalizeDrmToken(NSString* token) {
+    if (![token isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+    NSString* normalizedToken = [token stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (normalizedToken.length == 0) {
+        return nil;
+    }
+    if ([normalizedToken caseInsensitiveCompare:@"null"] == NSOrderedSame) {
+        return nil;
+    }
+    return normalizedToken;
+}
+
+static NSString* BetterPlayerNormalizeNonEmptyString(NSString* value) {
+    if (![value isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+    NSString* normalizedValue = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return normalizedValue.length > 0 ? normalizedValue : nil;
+}
+
+static BOOL BetterPlayerIsRemoteCertificateUrl(NSString* certificateUrl) {
+    NSString* lowerCertificateUrl = [certificateUrl lowercaseString];
+    return [lowerCertificateUrl hasPrefix:@"http://"] || [lowerCertificateUrl hasPrefix:@"https://"];
+}
+
+static NSString* BetterPlayerCertificateUrlPreview(NSString* certificateUrl) {
+    if (certificateUrl.length == 0) {
+        return @"(empty)";
+    }
+    if (BetterPlayerIsRemoteCertificateUrl(certificateUrl)) {
+        return certificateUrl;
+    }
+    const NSUInteger previewLength = MIN((NSUInteger)32, certificateUrl.length);
+    return [NSString stringWithFormat:@"%@... (%lu chars, inline base64)",
+            [certificateUrl substringToIndex:previewLength],
+            (unsigned long)certificateUrl.length];
+}
 
 
 #if TARGET_OS_IOS
@@ -19,11 +60,22 @@ API_AVAILABLE(ios(9.0))
 AVPictureInPictureController *_pipController;
 #endif
 
+/** ~300 kbps startup peak so Auto ABR begins on a low rung, then unlocks. */
+static const double kAbrStartupPeakBitRate = 300000.0;
+/** Silent live-edge recovery when AVPlayer falls behind / stalls on live HLS. */
+static const NSInteger kMaxLiveEdgeRecoveries = 20;
+
 @implementation BetterPlayer {
     NSTimer *nerdStatTimer;
     BetterPlayerVuDrmAssetsLoaderDelegate *_vuDrmAssetsloaderDelegate;
     BOOL nerdStatActive;
     double lastBitRate;
+    /// YES after Auto (0x0x0) until buffer is healthy and peak cap is cleared.
+    BOOL _autoAbrPendingUnlock;
+    NSInteger _liveEdgeRecoverCount;
+    NSTimeInterval _lastLiveEdgeRecoverAt;
+    /// Set once we observe indefinite duration (live HLS/DASH).
+    BOOL _isLiveStream;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame dictQuanteecConfig:(NSDictionary * _Nullable)dictQuanteecConfig {
@@ -33,29 +85,145 @@ AVPictureInPictureController *_pipController;
     _isPlaying = false;
     _disposed = false;
     _player = [[AVPlayer alloc] init];
-    
+
     //TODO: handle quanteec when package available
     /*if (dictQuanteecConfig) {
         [QuanteecHelper setupWithPlayer:_player dictQuanteecConfig: dictQuanteecConfig];
     }*/
-    
+
     BetterPlayerView *playerView = [[BetterPlayerView alloc] initWithFrame:CGRectZero];
     playerView.player = _player;
     _thisView = playerView;
-    
+
     [self setUpAdsLoader];
 //    _adTagUrlOrAdsResponse = @"https://ap-south-1-prod.ads.expresswifi.com/ads/video?h=720&w=600&api_key=BHPGAIUBVG4QIJIA&apid=3412547012154583&tag=app-10001-0002&skip=5";
     _isAdTagUrl = TRUE;
     _contentPlayhead = [[IMAAVPlayerContentPlayhead alloc] initWithAVPlayer:_player];
 //    [self requestAds];
-    
+
     _player.actionAtItemEnd = AVPlayerActionAtItemEndNone;
     ///Fix for loading large videos
     if (@available(iOS 10.0, *)) {
         _player.automaticallyWaitsToMinimizeStalling = false;
     }
+
     self._observersAdded = false;
+    _liveEdgeRecoverCount = 0;
+    _lastLiveEdgeRecoverAt = 0;
+    _isLiveStream = NO;
     return self;
+}
+
+/// Live when duration is indefinite, or we previously observed a live item this session.
+- (BOOL)isLikelyLiveItem:(AVPlayerItem *)item {
+    if (_isLiveStream) return YES;
+    if (item == nil) return NO;
+    if (CMTIME_IS_INDEFINITE(item.duration)) {
+        _isLiveStream = YES;
+        return YES;
+    }
+    return NO;
+}
+
+/// AVPlayer is advancing frames (may still report playbackBufferEmpty with stalling disabled).
+- (BOOL)isActivelyPlaying {
+    if (@available
+    (iOS
+    10.0, *)) {
+        return _player.timeControlStatus == AVPlayerTimeControlStatusPlaying;
+    }
+    return _player.rate > 0;
+}
+
+- (void)sendBufferingStart {
+    if (_eventSink == nil) {
+        return;
+    }
+    NSMutableDictionary *event = [@{@"event": @"bufferingStart"} mutableCopy];
+    if (_key != nil) {
+        event[@"key"] = _key;
+    }
+    _eventSink(event);
+}
+
+- (void)sendBufferingEnd {
+    if (_eventSink == nil) {
+        return;
+    }
+    NSMutableDictionary *event = [@{@"event": @"bufferingEnd"} mutableCopy];
+    if (_key != nil) {
+        event[@"key"] = _key;
+    }
+    _eventSink(event);
+}
+
+/// Parity with Android STATE_READY → bufferingEnd after silent live-edge recovery.
+- (void)notifyPlaybackResumedAfterRecovery {
+    __weak BetterPlayer *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BetterPlayer *strong = weakSelf;
+        if (strong == nil || strong.disposed) {
+            return;
+        }
+        if (strong->_isPlaying || [strong isActivelyPlaying]) {
+            [strong sendBufferingEnd];
+        }
+    });
+}
+
+- (BOOL)recoverToLiveEdge:(NSString *)reason {
+    AVPlayerItem *item = _player.currentItem;
+    if (item == nil) return NO;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - _lastLiveEdgeRecoverAt < 1.5) {
+        NSLog(@"[LiveEdge] recovery debounced (%@)", reason);
+        return YES;
+    }
+    if (_liveEdgeRecoverCount >= kMaxLiveEdgeRecoveries) {
+        NSLog(@"[LiveEdge] recovery exhausted after %ld attempts", (long) _liveEdgeRecoverCount);
+        return NO;
+    }
+
+    _liveEdgeRecoverCount++;
+    _lastLiveEdgeRecoverAt = now;
+    _stalledCount = 0;
+    _isStalledCheckStarted = false;
+    NSLog(@"[LiveEdge] recovery attempt=%ld (%@)", (long) _liveEdgeRecoverCount, reason);
+
+    // Failed items cannot seek reliably — rebuild from the same asset (keeps headers/DRM loader).
+    if (item.status == AVPlayerItemStatusFailed) {
+        AVAsset *asset = item.asset;
+        if (asset == nil) return NO;
+        AVPlayerItem *fresh = [AVPlayerItem playerItemWithAsset:asset];
+        [self removeObservers];
+        [_player replaceCurrentItemWithPlayerItem:fresh];
+        [self addObservers:fresh];
+        [self play];
+        [self notifyPlaybackResumedAfterRecovery];
+        return YES;
+    }
+
+    CMTime liveTime = kCMTimeInvalid;
+    NSArray *ranges = item.seekableTimeRanges;
+    if (ranges.count > 0) {
+        CMTimeRange last = [[ranges lastObject] CMTimeRangeValue];
+        liveTime = CMTimeRangeGetEnd(last);
+    } else if (CMTIME_IS_INDEFINITE(item.duration) || _isLiveStream) {
+        liveTime = kCMTimePositiveInfinity;
+    }
+    if (!CMTIME_IS_VALID(liveTime)) return NO;
+
+    __weak BetterPlayer *weakSelf = self;
+    [_player seekToTime:liveTime
+        toleranceBefore:kCMTimeZero
+         toleranceAfter:kCMTimeZero
+      completionHandler:^(BOOL finished) {
+          BetterPlayer *strong = weakSelf;
+          if (strong == nil || strong.disposed) return;
+          [strong play];
+          [strong notifyPlaybackResumedAfterRecovery];
+      }];
+    return YES;
 }
 
 - (void)toggleNerdStat {
@@ -88,6 +256,14 @@ AVPictureInPictureController *_pipController;
 - (void)addObservers:(AVPlayerItem*)item {
     if (!self._observersAdded){
         [_player addObserver:self forKeyPath:@"rate" options:0 context:nil];
+        if (@available
+        (iOS
+        10.0, *)) {
+            [_player addObserver:self
+                      forKeyPath:@"timeControlStatus"
+                         options:NSKeyValueObservingOptionNew
+                         context:timeControlStatusContext];
+        }
         [item addObserver:self forKeyPath:@"loadedTimeRanges" options:0 context:timeRangeContext];
         [item addObserver:self forKeyPath:@"status" options:0 context:statusContext];
         [item addObserver:self forKeyPath:@"presentationSize" options:0 context:presentationSizeContext];
@@ -125,6 +301,20 @@ AVPictureInPictureController *_pipController;
             _eventSink(@{@"event" : @"bitrateUpdate", @"values" : [NSNumber numberWithInt:(int)lastBitRate]});
         }
     }
+    // Once AVPlayer reports a variant, lift the startup peak so ABR can upshift.
+    if (_autoAbrPendingUnlock && lastEventNumber > 0) {
+        [self unlockAutoAbrIfNeeded];
+    }
+}
+
+- (void)unlockAutoAbrIfNeeded {
+    if (!_autoAbrPendingUnlock) {
+        return;
+    }
+    _autoAbrPendingUnlock = NO;
+    if (_player.currentItem != nil) {
+        _player.currentItem.preferredPeakBitRate = 0;
+    }
 }
 
 - (void)clear {
@@ -134,6 +324,10 @@ AVPictureInPictureController *_pipController;
     _failedCount = 0;
     _key = nil;
     _adTagUrlOrAdsResponse = @"";
+    _autoAbrPendingUnlock = NO;
+    _liveEdgeRecoverCount = 0;
+    _lastLiveEdgeRecoverAt = 0;
+    _isLiveStream = NO;
     if (_player.currentItem == nil) {
         return;
     }
@@ -150,6 +344,11 @@ AVPictureInPictureController *_pipController;
 - (void) removeObservers{
     if (self._observersAdded){
         [_player removeObserver:self forKeyPath:@"rate" context:nil];
+        if (@available
+        (iOS
+        10.0, *)) {
+            [_player removeObserver:self forKeyPath:@"timeControlStatus" context:timeControlStatusContext];
+        }
         [[_player currentItem] removeObserver:self forKeyPath:@"status" context:statusContext];
         [[_player currentItem] removeObserver:self forKeyPath:@"presentationSize" context:presentationSizeContext];
         [[_player currentItem] removeObserver:self
@@ -252,10 +451,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)setDataSourceAsset:(NSString*)asset withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration withDrmToken: (NSString *)drmToken {
     NSString* path = [[NSBundle mainBundle] pathForResource:asset ofType:nil];
-    return [self setDataSourceURL:[NSURL fileURLWithPath:path] withKey:key withCertificateUrl:certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders: @{} withCache: false cacheKey:cacheKey cacheManager:cacheManager overriddenDuration:overriddenDuration videoExtension: nil adsUrl:@"" withDrmToken:drmToken];
+    return [self setDataSourceURL:[NSURL fileURLWithPath:path] withKey:key withCertificateUrl:certificateUrl withLicenseUrl:(NSString *) licenseUrl withHeaders:@{} withCache:false cacheKey:cacheKey cacheManager:cacheManager overriddenDuration:overriddenDuration videoExtension:nil adsUrl:@"" withDrmToken:drmToken cmcdConfig:nil];
 }
 
-- (void)setDataSourceURL:(NSURL*)url withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders:(NSDictionary*)headers withCache:(BOOL)useCache cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration videoExtension: (NSString*) videoExtension adsUrl: (NSString*) adsUrl withDrmToken: (NSString *)drmToken {
+- (void)setDataSourceURL:(NSURL *)url withKey:(NSString *)key withCertificateUrl:(NSString *)certificateUrl withLicenseUrl:(NSString *)licenseUrl withHeaders:(NSDictionary *)headers withCache:(BOOL)useCache cacheKey:(NSString *)cacheKey cacheManager:(CacheManager *)cacheManager overriddenDuration:(int)overriddenDuration videoExtension:(NSString *)videoExtension adsUrl:(NSString *)adsUrl withDrmToken:(NSString *)drmToken cmcdConfig:(NSDictionary * _Nullable)cmcdConfig {
     if (adsUrl != (id)[NSNull null]) {
         _adTagUrlOrAdsResponse = adsUrl;
         [self requestAds];
@@ -263,6 +462,20 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     _overriddenDuration = 0;
     if (headers == [NSNull null] || headers == NULL){
         headers = @{};
+    }
+
+    // CMCD: iOS native HLS cannot tag per-segment requests; only initial URL / static headers.
+    // Never attach CMCD to DRM license/key flows (handled by resource-loader delegates below).
+    NSURL *mediaURL = url;
+    NSDictionary *mediaHeaders = headers;
+    @try {
+        if ([CmcdHelper isActiveWithConfig:cmcdConfig]) {
+            mediaURL = [CmcdHelper taggedURLFrom:url config:cmcdConfig];
+            mediaHeaders = [CmcdHelper httpHeadersMerging:headers config:cmcdConfig url:mediaURL];
+        }
+    } @catch (NSException *exception) {
+        mediaURL = url;
+        mediaHeaders = headers;
     }
     
     AVPlayerItem* item;
@@ -273,21 +486,36 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         if (videoExtension == [NSNull null]){
             videoExtension = nil;
         }
-        
-        item = [cacheManager getCachingPlayerItemForNormalPlayback:url cacheKey:cacheKey videoExtension: videoExtension headers:headers];
+
+        item = [cacheManager getCachingPlayerItemForNormalPlayback:mediaURL cacheKey:cacheKey videoExtension:videoExtension headers:mediaHeaders];
     } else {
-        AVURLAsset* asset = [AVURLAsset URLAssetWithURL:url
-                                                options:@{@"AVURLAssetHTTPHeaderFieldsKey" : headers}];
-        //if drmToken is passed, it is vu drm, else fallback to ez drm
-        if ((drmToken != (id)[NSNull null]) && ([drmToken length] > 0) && (certificateUrl != (id)[NSNull null])) {
-            NSURL * licenseNSURL = [[NSURL alloc] initWithString: licenseUrl];
-            _vuDrmAssetsloaderDelegate = [[BetterPlayerVuDrmAssetsLoaderDelegate alloc]initWithCertificateURL:certificateUrl licenseURL:licenseNSURL fairPlayToken:drmToken];
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:mediaURL
+                                                options:@{@"AVURLAssetHTTPHeaderFieldsKey": mediaHeaders}];
+        NSString* normalizedDrmToken = BetterPlayerNormalizeDrmToken(drmToken);
+        NSString* normalizedCertificateUrl = BetterPlayerNormalizeNonEmptyString(certificateUrl);
+        NSString* normalizedLicenseUrl = BetterPlayerNormalizeNonEmptyString(licenseUrl);
+        // VuDRM handles token-based providers (e.g. Lionsgate) and inline-certificate providers (e.g. SonyLiv ExpressPlay).
+        if (normalizedCertificateUrl != nil && normalizedLicenseUrl != nil &&
+            (normalizedDrmToken != nil || !BetterPlayerIsRemoteCertificateUrl(normalizedCertificateUrl))) {
+            BOOL isInlineCertificate = !BetterPlayerIsRemoteCertificateUrl(normalizedCertificateUrl);
+            NSLog(@"[BetterPlayer-FairPlay] Using VuDRM delegate (inlineCertificate=%@, hasToken=%@)",
+                  isInlineCertificate ? @"YES" : @"NO",
+                  normalizedDrmToken != nil ? @"YES" : @"NO");
+            NSLog(@"[BetterPlayer-FairPlay] certificateUrl=%@",
+                  BetterPlayerCertificateUrlPreview(normalizedCertificateUrl));
+            NSLog(@"[BetterPlayer-FairPlay] licenseUrl=%@", normalizedLicenseUrl);
+            NSURL * licenseNSURL = [[NSURL alloc] initWithString: normalizedLicenseUrl];
+            _vuDrmAssetsloaderDelegate = [[BetterPlayerVuDrmAssetsLoaderDelegate alloc]initWithCertificateURL:normalizedCertificateUrl licenseURL:licenseNSURL fairPlayToken:normalizedDrmToken];
             dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_DEFAULT, -1);
             dispatch_queue_t streamQueue = dispatch_queue_create("streamQueue", qos);
             [asset.resourceLoader setDelegate:_vuDrmAssetsloaderDelegate queue:streamQueue];
-        } else if (certificateUrl && certificateUrl != [NSNull null] && [certificateUrl length] > 0) {
-            NSURL * certificateNSURL = [[NSURL alloc] initWithString: certificateUrl];
-            NSURL * licenseNSURL = [[NSURL alloc] initWithString: licenseUrl];
+        } else if (normalizedCertificateUrl != nil && normalizedLicenseUrl != nil) {
+            NSLog(@"[BetterPlayer-FairPlay] Using EzDRM delegate");
+            NSLog(@"[BetterPlayer-FairPlay] certificateUrl=%@",
+                  BetterPlayerCertificateUrlPreview(normalizedCertificateUrl));
+            NSLog(@"[BetterPlayer-FairPlay] licenseUrl=%@", normalizedLicenseUrl);
+            NSURL * certificateNSURL = [[NSURL alloc] initWithString: normalizedCertificateUrl];
+            NSURL * licenseNSURL = [[NSURL alloc] initWithString: normalizedLicenseUrl];
             _loaderDelegate = [[BetterPlayerEzDrmAssetsLoaderDelegate alloc] init:certificateNSURL withLicenseURL:licenseNSURL];
             dispatch_queue_attr_t qos = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_DEFAULT, -1);
             dispatch_queue_t streamQueue = dispatch_queue_create("streamQueue", qos);
@@ -305,6 +533,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 - (void)setDataSourcePlayerItem:(AVPlayerItem*)item withKey:(NSString*)key{
     _key = key;
     _stalledCount = 0;
+    _liveEdgeRecoverCount = 0;
+    _lastLiveEdgeRecoverAt = 0;
+    _isLiveStream = NO;
     _isStalledCheckStarted = false;
     _playerRate = 1;
     [_player replaceCurrentItemWithPlayerItem:item];
@@ -354,9 +585,15 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (_player.currentItem.playbackLikelyToKeepUp ||
         [self availableDuration] - CMTimeGetSeconds(_player.currentItem.currentTime) > 10.0) {
         [self play];
+        // timeControlStatus may already be Playing (no KVO re-fire) — clear sticky loader.
+        [self sendBufferingEnd];
     } else {
         _stalledCount++;
         if (_stalledCount > 60){
+            // Live: jump to edge instead of surfacing Retry.
+            if ([self isLikelyLiveItem:_player.currentItem] && [self recoverToLiveEdge:@"stalled"]) {
+                return;
+            }
             if (_eventSink != nil) {
                 _eventSink([FlutterError
                         errorWithCode:@"VideoError"
@@ -450,14 +687,22 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         switch (item.status) {
             case AVPlayerItemStatusFailed:
                 NSLog(@"Failed to load video:");
-                NSLog(item.error.debugDescription);
+                NSLog(@"%@", item.error.debugDescription);
+
+                // Live HLS can fail when the playhead falls behind the sliding window.
+                if ([self isLikelyLiveItem:item] && [self recoverToLiveEdge:@"itemFailed"]) {
+                    break;
+                }
 
                 if (_eventSink != nil) {
+                    NSString *errorMessage = [NSString stringWithFormat:@"Failed to load video: %@ | Debug: %@",
+                                                                        [item.error localizedDescription],
+                                                                        item.error.debugDescription ?: @"No debug details available"];
+
                     _eventSink([FlutterError
-                                errorWithCode:@"VideoError"
-                                message:[@"Failed to load video: "
-                                         stringByAppendingString:[item.error localizedDescription]]
-                                details:nil]);
+                            errorWithCode:@"VideoError"
+                                  message:errorMessage
+                                  details:nil]);
                 }
                 break;
             case AVPlayerItemStatusUnknown:
@@ -466,21 +711,36 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                 [self onReadyToPlay];
                 break;
         }
-    } else if (context == playbackLikelyToKeepUpContext) {
-        if ([[_player currentItem] isPlaybackLikelyToKeepUp]) {
-            [self updatePlayingState];
-            if (_eventSink != nil) {
-                _eventSink(@{@"event" : @"bufferingEnd", @"key" : _key});
+    } else if (context == timeControlStatusContext) {
+        // Primary buffering signal: Playing clears Flutter loader; Waiting shows it.
+        // Needed because automaticallyWaitsToMinimizeStalling=NO can play while
+        // isPlaybackLikelyToKeepUp stays false (no bufferingEnd from item KVO).
+        if (@available
+        (iOS
+        10.0, *)) {
+            AVPlayerTimeControlStatus status = _player.timeControlStatus;
+            if (status == AVPlayerTimeControlStatusPlaying) {
+                [self unlockAutoAbrIfNeeded];
+                [self sendBufferingEnd];
+            } else if (status == AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate) {
+                [self sendBufferingStart];
             }
         }
+    } else if (context == playbackLikelyToKeepUpContext) {
+        if ([[_player currentItem] isPlaybackLikelyToKeepUp]) {
+            [self unlockAutoAbrIfNeeded];
+            [self updatePlayingState];
+            [self sendBufferingEnd];
+        }
     } else if (context == playbackBufferEmptyContext) {
-        if (_eventSink != nil) {
-            _eventSink(@{@"event" : @"bufferingStart", @"key" : _key});
+        // With stalling minimization disabled, buffer can empty while frames still advance.
+        // Do not sticky-start the Flutter loader over active playback.
+        if ([self isActivelyPlaying]) {
+            return;
         }
+        [self sendBufferingStart];
     } else if (context == playbackBufferFullContext) {
-        if (_eventSink != nil) {
-            _eventSink(@{@"event" : @"bufferingEnd", @"key" : _key});
-        }
+        [self sendBufferingEnd];
     }
 }
 
@@ -527,6 +787,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
             return;
         }
         const BOOL isLive = CMTIME_IS_INDEFINITE([_player currentItem].duration);
+        if (isLive) {
+            _isLiveStream = YES;
+        }
         // The player may be initialized but still needs to determine the duration.
         if (isLive == false && [self duration] == 0) {
             return;
@@ -642,6 +905,18 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 
 - (void)setTrackParameters:(int) width: (int) height: (int)bitrate {
+    if (width == 0 && height == 0 && bitrate == 0) {
+        // Auto: start with a low peak so playback begins on a low rung, then unlock.
+        _autoAbrPendingUnlock = YES;
+        _player.currentItem.preferredPeakBitRate = kAbrStartupPeakBitRate;
+        if (@available
+        (iOS
+        11.0, *)) {
+            _player.currentItem.preferredMaximumResolution = CGSizeZero;
+        }
+        return;
+    }
+    _autoAbrPendingUnlock = NO;
     _player.currentItem.preferredPeakBitRate = bitrate;
     if (@available(iOS 11.0, *)) {
         if (width == 0 && height == 0){
