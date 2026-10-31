@@ -77,10 +77,15 @@ import java.util.*
 import kotlin.math.max
 import kotlin.math.min
 import com.google.android.exoplayer2.analytics.AnalyticsListener.EventTime
+import com.jhomlala.better_player.cmcd.CmcdDataSource
+import com.jhomlala.better_player.cmcd.CmcdMetrics
+import com.jhomlala.better_player.cmcd.CmcdRuntimeConfig
+import com.jhomlala.better_player.cmcd.CmcdSession
 import com.quanteec.plugin.settings.QuanteecConfig
 import com.quanteec.quanteecexoplugin2_17.QuanteecBaseDataSource
 import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecBandwidthMeters
 import com.quanteec.quanteecexoplugin2_17.exoplayer.QuanteecExoCore
+import java.util.concurrent.atomic.AtomicReference
 
 internal class BetterPlayer(
     context: Context,
@@ -146,6 +151,10 @@ internal class BetterPlayer(
     private var isSilentDrmRelicensing = false
     private var silentDrmRelicenseCount = 0
     private var lastSilentDrmRelicenseAtMs = 0L
+    private var behindLiveWindowRecoverCount = 0
+    private var lastBehindLiveWindowRecoverAtMs = 0L
+    private var decoderFailureRecoverCount = 0
+    private var lastDecoderFailureRecoverAtMs = 0L
 
     /// nerdstat
     var startNerdStat = false
@@ -158,6 +167,9 @@ internal class BetterPlayer(
 
     var quanteecConfig: QuanteecConfig? = null
     var quanteecCore: QuanteecExoCore? = null
+
+    private val cmcdSessionRef = AtomicReference<CmcdSession?>(null)
+    private val cmcdConfigRef = AtomicReference<CmcdRuntimeConfig?>(null)
 
     init {
         val loadBuilder = DefaultLoadControl.Builder()
@@ -320,13 +332,17 @@ internal class BetterPlayer(
         drmHeaders: Map<String, String>?,
         extraParams: Map<String, String>?,
         cacheKey: String?,
-        clearKey: String?
+        clearKey: String?,
+        cmcdConfigMap: Map<String, Any?>? = null,
     ) {
         this.key = key
         isInitialized = false
         silentDrmRelicenseCount = 0
         lastSilentDrmRelicenseAtMs = 0L
         isSilentDrmRelicensing = false
+        behindLiveWindowRecoverCount = 0
+        lastBehindLiveWindowRecoverAtMs = 0L
+        configureCmcd(cmcdConfigMap)
         var adsUri: Uri? = null
         val uri = Uri.parse(dataSource)
         if (adsLink != null && !adsLink.isEmpty()) {
@@ -344,6 +360,7 @@ internal class BetterPlayer(
             dataSourceFactory = buildRtmp()
         } else if (isHTTP(uri)) {
             dataSourceFactory = getDataSourceFactory(userAgent, headers)
+            dataSourceFactory = maybeWrapCmcd(dataSourceFactory)
             if (useCache == true && maxCacheSize > 0 && maxCacheFileSize > 0) {
                 dataSourceFactory = CacheDataSourceFactory(
                     context,
@@ -435,19 +452,21 @@ internal class BetterPlayer(
         val context = drmAppContext ?: return
 
         if (drmIsDash) {
+            val mediaFactory = maybeWrapCmcd(DefaultHttpDataSource.Factory())
             val drmMediaSource = DrmHelper().buildDrmMediaSource(
                 uri,
                 context,
                 drmToken,
                 drmHeadersCached,
-                licenseUrl
+                licenseUrl,
+                mediaDataSourceFactory = mediaFactory,
             ) {
                 requestSilentDrmRelicense("keyExpired")
             }
             exoPlayer?.setMediaSource(drmMediaSource)
         } else {
             drmSessionManager = buildWidevineDrmSessionManager(licenseUrl)
-            val factory = drmDataSourceFactory ?: DefaultDataSource.Factory(context)
+            val factory = drmDataSourceFactory ?: maybeWrapCmcd(DefaultDataSource.Factory(context))
             buildMediaSource(uri, drmAdsUri, factory, drmFormatHint, drmCacheKey, context)
         }
         if (fromSilentRelicense) {
@@ -481,6 +500,118 @@ internal class BetterPlayer(
             }
         }
         return true
+    }
+
+    /** HLS/DASH live: playlist moved on; seek to live edge instead of fatal Retry. */
+    private fun isBehindLiveWindow(error: PlaybackException): Boolean {
+        if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+            return true
+        }
+        var cause: Throwable? = error.cause
+        while (cause != null) {
+            if (cause is BehindLiveWindowException) return true
+            val text = "${cause.javaClass.name} ${cause.message}"
+            if (text.contains("BehindLiveWindowException")) return true
+            cause = cause.cause
+        }
+        return false
+    }
+
+    private fun recoverBehindLiveWindow(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBehindLiveWindowRecoverAtMs < BEHIND_LIVE_WINDOW_RECOVER_DEBOUNCE_MS) {
+            Log.i(TAG, "BehindLiveWindow recovery debounced")
+            return true
+        }
+        if (behindLiveWindowRecoverCount >= MAX_BEHIND_LIVE_WINDOW_RECOVERIES) {
+            Log.w(
+                TAG,
+                "BehindLiveWindow recovery exhausted after $behindLiveWindowRecoverCount attempts"
+            )
+            return false
+        }
+        behindLiveWindowRecoverCount++
+        lastBehindLiveWindowRecoverAtMs = now
+        Log.i(
+            TAG,
+            "BehindLiveWindow recovery attempt=$behindLiveWindowRecoverCount — seekToDefaultPosition + prepare"
+        )
+        return try {
+            exoPlayer?.seekToDefaultPosition()
+            exoPlayer?.prepare()
+            exoPlayer?.playWhenReady = true
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "BehindLiveWindow recovery failed", e)
+            false
+        }
+    }
+
+    /**
+     * MediaCodec TIMED_OUT / decoder failures leave ExoPlayer paused with a dead
+     * OMX decoder. Flutter only sees VideoError and may not recreate codecs via
+     * setupDataSource alone. stop()+prepare() forces renderer recreation.
+     */
+    private fun isDecoderFailure(error: PlaybackException): Boolean {
+        if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
+            error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
+        ) {
+            return true
+        }
+        var cause: Throwable? = error.cause
+        while (cause != null) {
+            val text = "${cause.javaClass.name} ${cause.message}"
+            if (text.contains("MediaCodecVideoDecoderException") ||
+                text.contains("MediaCodecDecoderException") ||
+                text.contains("MediaCodecAudioDecoderException") ||
+                text.contains("Decoder failed") ||
+                text.contains("CodecException") ||
+                text.contains("OMX.")
+            ) {
+                return true
+            }
+            cause = cause.cause
+        }
+        return false
+    }
+
+    private fun recoverDecoderFailure(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDecoderFailureRecoverAtMs < DECODER_FAILURE_RECOVER_DEBOUNCE_MS) {
+            Log.i(TAG, "DecoderFailure recovery debounced")
+            return true
+        }
+        if (decoderFailureRecoverCount >= MAX_DECODER_FAILURE_RECOVERIES) {
+            Log.w(
+                TAG,
+                "DecoderFailure recovery exhausted after $decoderFailureRecoverCount attempts"
+            )
+            return false
+        }
+        decoderFailureRecoverCount++
+        lastDecoderFailureRecoverAtMs = now
+        val position = exoPlayer?.currentPosition ?: 0L
+        val live = exoPlayer?.isCurrentMediaItemLive == true
+        Log.i(
+            TAG,
+            "DecoderFailure recovery attempt=$decoderFailureRecoverCount live=$live position=$position — stop + prepare"
+        )
+        return try {
+            // stop() releases failed codecs; prepare() rebuilds renderers on the same media source.
+            exoPlayer?.stop()
+            exoPlayer?.prepare()
+            if (live) {
+                exoPlayer?.seekToDefaultPosition()
+            } else if (position > 0L) {
+                exoPlayer?.seekTo(position)
+            }
+            exoPlayer?.playWhenReady = true
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "DecoderFailure recovery failed", e)
+            false
+        }
     }
 
     private fun isDrmLicenseFailure(error: PlaybackException): Boolean {
@@ -797,8 +928,9 @@ internal class BetterPlayer(
             }
         }
 
+        // Only setMediaSource — setMediaItem would rebuild via the player’s default
+        // MediaSourceFactory and drop the CMCD-wrapped DataSource.Factory.
         exoPlayer?.setMediaSource(mediaSource)
-        exoPlayer?.setMediaItem(mediaItem)
         exoPlayer?.playWhenReady = true
         exoPlayer?.let {
             quanteecCore?.setPlayer(it);
@@ -834,6 +966,9 @@ internal class BetterPlayer(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
                     Player.STATE_BUFFERING -> {
+                        if (isInitialized) {
+                            cmcdSessionRef.get()?.setRebuffering(true)
+                        }
                         sendBufferingUpdate(true)
                         val event: MutableMap<String, Any> = HashMap()
                         event["event"] = "bufferingStart"
@@ -841,6 +976,12 @@ internal class BetterPlayer(
                     }
 
                     Player.STATE_READY -> {
+                        // Successful playback — allow future MediaCodec recoveries.
+                        decoderFailureRecoverCount = 0
+                        cmcdSessionRef.get()?.let { session ->
+                            session.setRebuffering(false)
+                            session.markStarted()
+                        }
                         if (!isInitialized) {
                             isInitialized = true
                             sendInitialized()
@@ -866,6 +1007,14 @@ internal class BetterPlayer(
             override fun onPlayerError(error: PlaybackException) {
                 if (isDrmLicenseFailure(error) && requestSilentDrmRelicense("playerError")) {
                     // Fresh DRM session recreate — do not surface error/loader to Flutter.
+                    return
+                }
+                if (isBehindLiveWindow(error) && recoverBehindLiveWindow()) {
+                    // Seek to live edge + re-prepare — do not surface Retry to Flutter.
+                    return
+                }
+                if (isDecoderFailure(error) && recoverDecoderFailure()) {
+                    // MediaCodec TIMED_OUT / OMX decoder dead — recreate renderers, keep playing.
                     return
                 }
                 eventSink.error("VideoError", "Video player had error $error", "${error.errorCode}")
@@ -1185,6 +1334,7 @@ internal class BetterPlayer(
 
     fun dispose() {
         releaseQuanteec()
+        clearCmcd()
         disposeMediaSession()
         disposeRemoteNotifications()
         if (isInitialized) {
@@ -1194,6 +1344,117 @@ internal class BetterPlayer(
         eventChannel.setStreamHandler(null)
         surface?.release()
         exoPlayer?.release()
+    }
+
+    private fun configureCmcd(raw: Map<String, Any?>?) {
+        val config = CmcdRuntimeConfig.fromMap(raw)
+        cmcdConfigRef.set(config)
+        if (config == null) {
+            cmcdSessionRef.set(null)
+            Log.d(TAG_CMCD, "disabled (missing/invalid config)")
+            return
+        }
+        CmcdDataSource.resetLogCount()
+        val existing = cmcdSessionRef.get()
+        if (existing == null || existing.sessionId != config.sessionId) {
+            cmcdSessionRef.set(
+                CmcdSession(config.sessionId, config.contentId, config.isLive)
+            )
+            Log.d(
+                TAG_CMCD,
+                "session start mode=${config.mode} sid=${config.sessionId} " +
+                        "cid=${config.contentId} isLive=${config.isLive}"
+            )
+        } else {
+            existing.isLive = config.isLive
+            existing.updateContentId(config.contentId)
+            Log.d(
+                TAG_CMCD,
+                "session update mode=${config.mode} sid=${config.sessionId} " +
+                        "cid=${config.contentId} isLive=${config.isLive}"
+            )
+        }
+    }
+
+    private fun clearCmcd() {
+        cmcdConfigRef.set(null)
+        cmcdSessionRef.set(null)
+    }
+
+    private fun maybeWrapCmcd(factory: DataSource.Factory): DataSource.Factory {
+        val config = cmcdConfigRef.get()
+        if (config == null || !config.isActive) {
+            Log.d(TAG_CMCD, "wrap skipped (inactive)")
+            return factory
+        }
+        // Quanteec replaces the media source factory at create-time; CMCD must not stack with it.
+        if (quanteecCore != null) {
+            Log.d(TAG_CMCD, "wrap skipped (quanteec active)")
+            return factory
+        }
+        Log.d(TAG_CMCD, "DataSource wrapped mode=${config.mode}")
+        return CmcdDataSource.Factory(
+            factory,
+            cmcdSessionRef,
+            cmcdConfigRef,
+            ::snapshotCmcdMetrics,
+            { drmLicenseUrl },
+        )
+    }
+
+    private fun snapshotCmcdMetrics(): CmcdMetrics {
+        val player = exoPlayer
+        var encodedKbps: Int? = null
+        var topKbps: Int? = null
+        try {
+            val format = player?.videoFormat
+            if (format != null && format.bitrate != Format.NO_VALUE) {
+                encodedKbps = (format.bitrate / 1000).coerceAtLeast(0)
+            }
+            val groups = player?.currentTrackGroups
+            if (groups != null) {
+                var maxBr = 0
+                for (i in 0 until groups.length) {
+                    val group = groups[i]
+                    for (j in 0 until group.length) {
+                        val br = group.getFormat(j).bitrate
+                        if (br != Format.NO_VALUE && br > maxBr) maxBr = br
+                    }
+                }
+                if (maxBr > 0) topKbps = maxBr / 1000
+            }
+        } catch (_: Exception) {
+        }
+        val throughput = try {
+            val estimate = bandwidthMeter.bitrateEstimate
+            if (estimate > 0) (estimate / 1000).toInt() else null
+        } catch (_: Exception) {
+            null
+        }
+        val bufferMs = try {
+            val p = player ?: return CmcdMetrics(
+                encodedBitrateKbps = encodedKbps,
+                topBitrateKbps = topKbps,
+                throughputKbps = throughput,
+            )
+            val buffered = p.bufferedPosition
+            val current = p.currentPosition
+            if (buffered >= current) buffered - current else null
+        } catch (_: Exception) {
+            null
+        }
+        val rate = try {
+            player?.playbackParameters?.speed ?: 1f
+        } catch (_: Exception) {
+            1f
+        }
+        return CmcdMetrics(
+            encodedBitrateKbps = encodedKbps,
+            topBitrateKbps = topKbps,
+            throughputKbps = throughput,
+            bufferLengthMs = bufferMs,
+            playbackRate = rate,
+        )
     }
 
     fun releaseQuanteec() {
@@ -1219,6 +1480,7 @@ internal class BetterPlayer(
 
     companion object {
         private const val TAG = "BetterPlayer"
+        private const val TAG_CMCD = "CMCD"
         private const val FORMAT_SS = "ss"
         private const val FORMAT_DASH = "dash"
         private const val FORMAT_HLS = "hls"
@@ -1234,6 +1496,12 @@ internal class BetterPlayer(
 
         /** Enough for multi-hour live with ~2 min rental windows. */
         private const val MAX_SILENT_DRM_RELICENSES = 120
+
+        private const val BEHIND_LIVE_WINDOW_RECOVER_DEBOUNCE_MS = 1500L
+        private const val MAX_BEHIND_LIVE_WINDOW_RECOVERIES = 20
+
+        private const val DECODER_FAILURE_RECOVER_DEBOUNCE_MS = 1500L
+        private const val MAX_DECODER_FAILURE_RECOVERIES = 5
 
         //Clear cache without accessing BetterPlayerCache.
         fun clearCache(context: Context?, result: MethodChannel.Result) {

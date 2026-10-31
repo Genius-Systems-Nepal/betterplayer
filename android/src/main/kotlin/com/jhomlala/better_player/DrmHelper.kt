@@ -13,6 +13,7 @@ import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.dash.DashChunkSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
 import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource
+import com.google.android.exoplayer2.upstream.DataSource
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
 import com.google.android.exoplayer2.util.Util
 import java.util.UUID
@@ -25,10 +26,12 @@ class DrmHelper {
         drmToken: String?,
         drmHeaders: Map<String, String>?,
         licenseUrl: String,
+        mediaDataSourceFactory: DataSource.Factory? = null,
         onKeyExpired: (() -> Unit)? = null
     ): MediaSource {
         // Force every key/renewal request onto the app-supplied licenseUrl so
         // CustomData (and other query auth) is never dropped for PSSH default URLs.
+        // License HTTP stays unwrapped (no CMCD on key fetches).
         val httpMediaDrmCallback =
             HttpMediaDrmCallback(
                 licenseUrl,
@@ -72,19 +75,19 @@ class DrmHelper {
             defaultDrmSessionManager
         }
 
-        return buildDashMediaSource(drmSessionManagerProvider, context, uri)
+        return buildDashMediaSource(drmSessionManagerProvider, uri, mediaDataSourceFactory)
     }
 
     private fun buildDashMediaSource(
         drmSessionManager: DrmSessionManagerProvider,
-        context: Context,
-        uri: Uri
+        uri: Uri,
+        mediaDataSourceFactory: DataSource.Factory?,
     ): DashMediaSource {
+        // Optional CMCD-wrapped factory for manifest/segments; never used for license.
+        val mediaFactory = mediaDataSourceFactory ?: DefaultHttpDataSource.Factory()
         val dashChunkSourceFactory: DashChunkSource.Factory =
-            DefaultDashChunkSource.Factory(DefaultHttpDataSource.Factory())
-        val manifestDataSourceFactory: DefaultHttpDataSource.Factory =
-            DefaultHttpDataSource.Factory()
-        return DashMediaSource.Factory(dashChunkSourceFactory, manifestDataSourceFactory)
+            DefaultDashChunkSource.Factory(mediaFactory)
+        return DashMediaSource.Factory(dashChunkSourceFactory, mediaFactory)
             .setDrmSessionManagerProvider(drmSessionManager)
             .createMediaSource(
                 MediaItem.Builder()

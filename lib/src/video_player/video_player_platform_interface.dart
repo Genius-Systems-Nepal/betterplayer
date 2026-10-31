@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:better_player/src/configuration/better_player_buffering_configuration.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+
 import 'method_channel_video_player.dart';
 
 /// The interface that implementations of video_player must implement.
@@ -272,6 +273,7 @@ class DataSource {
     this.activityName,
     this.clearKey,
     this.videoExtension,
+    this.cmcdConfig,
   }) : assert(uri == null || asset == null);
 
   /// Describes the type of data source this [VideoPlayerController]
@@ -353,6 +355,9 @@ class DataSource {
   final String? clearKey;
 
   final String? videoExtension;
+
+  /// CTA-5004 CMCD (passed to native media HTTP stack).
+  final Map<String, dynamic>? cmcdConfig;
 
   /// Key to compare DataSource
   String? get key {

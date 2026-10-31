@@ -381,6 +381,9 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 getParameter(dataSource, DRM_HEADERS_PARAMETER, HashMap())
             val extraParams: Map<String, String> =
                 getParameter(dataSource, EXTRA_PARAMS_PARAMETER, HashMap())
+
+            @Suppress("UNCHECKED_CAST")
+            val cmcdConfig = dataSource["cmcdConfig"] as? Map<String, Any?>
             player.setDataSource(
                 flutterState!!.applicationContext,
                 key,
@@ -397,7 +400,8 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 drmHeaders,
                 extraParams,
                 cacheKey,
-                clearKey
+                clearKey,
+                cmcdConfig,
             )
         }
     }

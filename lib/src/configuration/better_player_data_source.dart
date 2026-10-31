@@ -77,6 +77,9 @@ class BetterPlayerDataSource {
 
   final Map<String, dynamic>? quanteecConfig;
 
+  /// CTA-5004 CMCD config (mutually exclusive with [quanteecConfig] at play time).
+  final Map<String, dynamic>? cmcdConfig;
+
   ///Configuration of video buffering. Currently only supported in Android
   ///platform.
   final BetterPlayerBufferingConfiguration bufferingConfiguration;
@@ -105,6 +108,7 @@ class BetterPlayerDataSource {
     this.drmConfiguration,
     this.placeholder,
     this.quanteecConfig,
+    this.cmcdConfig,
     this.bufferingConfiguration = const BetterPlayerBufferingConfiguration(),
   }) : assert(
             (type == BetterPlayerDataSourceType.network ||
@@ -133,6 +137,7 @@ class BetterPlayerDataSource {
     BetterPlayerDrmConfiguration? drmConfiguration,
     Widget? placeholder,
     Map<String, dynamic>? quanteecConfig,
+    Map<String, dynamic>? cmcdConfig,
     BetterPlayerBufferingConfiguration bufferingConfiguration =
         const BetterPlayerBufferingConfiguration(),
   }) {
@@ -155,6 +160,7 @@ class BetterPlayerDataSource {
       placeholder: placeholder,
       bufferingConfiguration: bufferingConfiguration,
       quanteecConfig: quanteecConfig,
+      cmcdConfig: cmcdConfig,
     );
   }
 
@@ -236,6 +242,7 @@ class BetterPlayerDataSource {
     BetterPlayerDrmConfiguration? drmConfiguration,
     Widget? placeholder,
     Map<String, dynamic>? quanteecConfig,
+    Map<String, dynamic>? cmcdConfig,
     BetterPlayerBufferingConfiguration? bufferingConfiguration =
         const BetterPlayerBufferingConfiguration(),
   }) {
@@ -260,6 +267,7 @@ class BetterPlayerDataSource {
       drmConfiguration: drmConfiguration ?? this.drmConfiguration,
       placeholder: placeholder ?? this.placeholder,
       quanteecConfig: quanteecConfig,
+      cmcdConfig: cmcdConfig ?? this.cmcdConfig,
       bufferingConfiguration:
           bufferingConfiguration ?? this.bufferingConfiguration,
     );

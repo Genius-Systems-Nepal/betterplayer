@@ -437,6 +437,7 @@ class BetterPlayerController {
           activityName: _betterPlayerDataSource?.notificationConfiguration?.activityName,
           clearKey: _betterPlayerDataSource?.drmConfiguration?.clearKey,
           videoExtension: _betterPlayerDataSource!.videoExtension,
+          cmcdConfig: _betterPlayerDataSource?.cmcdConfig,
         );
 
         break;
@@ -733,13 +734,20 @@ class BetterPlayerController {
         videoPlayerController?.value ?? VideoPlayerValue(duration: const Duration());
 
     if (currentVideoPlayerValue.hasError) {
+      // Post exception once per error until cleared — otherwise every tick
+      // while hasError burns through Flutter auto-retry and leaves UI stuck.
+      final bool isNewError = _videoPlayerValueOnError == null ||
+          _videoPlayerValueOnError!.errorDescription != currentVideoPlayerValue.errorDescription;
       _videoPlayerValueOnError ??= currentVideoPlayerValue;
-      _postEvent(
-        BetterPlayerEvent(
-          BetterPlayerEventType.exception,
-          parameters: <String, dynamic>{"exception": currentVideoPlayerValue.errorDescription},
-        ),
-      );
+      if (isNewError) {
+        _videoPlayerValueOnError = currentVideoPlayerValue;
+        _postEvent(
+          BetterPlayerEvent(
+            BetterPlayerEventType.exception,
+            parameters: <String, dynamic>{"exception": currentVideoPlayerValue.errorDescription},
+          ),
+        );
+      }
     }
     if (currentVideoPlayerValue.initialized && !_hasCurrentDataSourceInitialized) {
       _hasCurrentDataSourceInitialized = true;
@@ -984,9 +992,10 @@ class BetterPlayerController {
   }
 
   // ignore: use_setters_to_change_properties
-  ///Setup overridden aspect ratio.
-  void setOverriddenAspectRatio(double aspectRatio) {
+  ///Setup overridden aspect ratio. Pass null to clear the override.
+  void setOverriddenAspectRatio(double? aspectRatio) {
     _overriddenAspectRatio = aspectRatio;
+    _postControllerEvent(BetterPlayerControllerEvent.changeFit);
   }
 
   ///Get aspect ratio used in current video. If aspect ratio is null, then
@@ -996,10 +1005,14 @@ class BetterPlayerController {
     return _overriddenAspectRatio ?? betterPlayerConfiguration.aspectRatio;
   }
 
+  /// Forced aspect override only (ignores configuration default).
+  double? getOverriddenAspectRatio() => _overriddenAspectRatio;
+
   // ignore: use_setters_to_change_properties
   ///Setup overridden fit.
   void setOverriddenFit(BoxFit fit) {
     _overriddenFit = fit;
+    _postControllerEvent(BetterPlayerControllerEvent.changeFit);
   }
 
   ///Get fit used in current video. If fit is null, then fit from
@@ -1158,12 +1171,22 @@ class BetterPlayerController {
 
   ///Retry data source if playback failed.
   Future retryDataSource() async {
+    final VideoPlayerValue? errorSnapshot = _videoPlayerValueOnError;
+    _videoPlayerValueOnError = null;
+    // Must clear sticky hasError — copyWith used to be unable to null it out.
+    final VideoPlayerController? vpc = videoPlayerController;
+    if (vpc != null && vpc.value.hasError) {
+      vpc.value = vpc.value.clearError();
+    }
     await _setupDataSource(_betterPlayerDataSource!);
-    if (_videoPlayerValueOnError != null) {
-      final position = _videoPlayerValueOnError!.position;
-      await seekTo(position);
+    if (errorSnapshot != null) {
+      final Duration position = errorSnapshot.position;
+      if (position > Duration.zero) {
+        await seekTo(position);
+      }
       await play();
-      _videoPlayerValueOnError = null;
+    } else {
+      await play();
     }
   }
 
