@@ -56,7 +56,7 @@ static NSString* BetterPlayerCertificateUrlPreview(NSString* certificateUrl) {
 
 
 #if TARGET_OS_IOS
-void (^__strong _Nonnull _restoreUserInterfaceForPIPStopCompletionHandler)(BOOL);
+void (^__strong _Nullable _restoreUserInterfaceForPIPStopCompletionHandler)(BOOL);
 API_AVAILABLE(ios(9.0))
 AVPictureInPictureController *_pipController;
 #endif
@@ -1286,6 +1286,8 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     _appInBackground = NO;
     // Drop any leftover root overlay from older PiP paths (dual-frame bug).
     [self _removeOverlayPipLayerIfNeeded];
+    // Expand-from-PiP: layer frame is still the PiP window until layout.
+    [_thisView setNeedsLayout];
     if (_pipDesiredPlaying && [self isPipActive]) {
         [self keepPipPlayingIfNeeded];
     }
@@ -1358,6 +1360,8 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     [self setPictureInPicture:false];
     // Never remove the inline BetterPlayerView layer — only leftover overlays.
     [self _removeOverlayPipLayerIfNeeded];
+    // PiP moves the layer frame; put it back on the Flutter view bounds.
+    [_thisView setNeedsLayout];
     if (!keepIntent && _eventSink != nil) {
         _eventSink(@{@"event" : @"pipStop"});
     }
@@ -1432,7 +1436,16 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (_pipDesiredPlaying || _isPlaying) {
         _pipResumeAfterStop = YES;
     }
-    [self setRestoreUserInterfaceForPIPStopCompletionHandler: true];
+    // Must invoke Apple's handler. The previous code never stored it, so iOS
+    // restored audio without putting video back on the inline layer.
+    _restoreUserInterfaceForPIPStopCompletionHandler = [completionHandler copy];
+    if (_thisView != nil && _player != nil && _thisView.playerLayer.player != _player) {
+        _thisView.playerLayer.player = _player;
+    }
+    [_thisView setNeedsLayout];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self setRestoreUserInterfaceForPIPStopCompletionHandler:YES];
+    });
 }
 
 - (void) setAudioTrack:(NSString*) name index:(int) index{
