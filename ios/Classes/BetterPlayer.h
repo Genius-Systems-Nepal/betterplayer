@@ -65,6 +65,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void) enablePictureInPicture: (CGRect) frame;
 - (void)setPictureInPicture:(BOOL)pictureInPicture;
 - (void)disablePictureInPicture;
+/// Mini-only: arm automatic system PiP when the app leaves foreground.
+- (void)setPipEnterOnLeave:(BOOL)enabled;
+/// Pause AVPlayer and clear Now Playing so Dynamic Island / lock-screen media go away.
+- (void)pauseAndHideMediaSession;
 - (int64_t)absolutePosition;
 - (int64_t) FLTCMTimeToMillis:(CMTime) time;
 - (void)toggleNerdStat;
