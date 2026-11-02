@@ -115,6 +115,10 @@ internal class BetterPlayer(
     )
     private val loadControl: LoadControl
     private var isInitialized = false
+
+    /** True after the viewer picks a specific rendition. Auto playback may cap on stall. */
+    private var manualBitrateLock = false
+    private var abrCappedForBuffer = false
     private var surface: Surface? = null
     private var key: String? = null
     private var playerNotificationManager: PlayerNotificationManager? = null
@@ -919,6 +923,7 @@ internal class BetterPlayer(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
                     Player.STATE_BUFFERING -> {
+                        capAbrForSlowBuffer()
                         if (isInitialized) {
                             cmcdSessionRef.get()?.setRebuffering(true)
                         }
@@ -929,6 +934,7 @@ internal class BetterPlayer(
                     }
 
                     Player.STATE_READY -> {
+                        releaseAbrCapIfLinkRecovered()
                         // Successful playback — allow future MediaCodec recoveries.
                         decoderFailureRecoverCount = 0
                         cmcdSessionRef.get()?.let { session ->
@@ -1040,17 +1046,43 @@ internal class BetterPlayer(
 
     fun setTrackParameters(width: Int, height: Int, bitrate: Int) {
         val parametersBuilder = trackSelector.buildUponParameters()
+        val auto = width == 0 && height == 0 && bitrate == 0
+        manualBitrateLock = !auto
+        if (!auto) {
+            abrCappedForBuffer = false
+        }
         if (width != 0 && height != 0) {
             parametersBuilder.setMaxVideoSize(width, height)
         }
         if (bitrate != 0) {
             parametersBuilder.setMaxVideoBitrate(bitrate)
         }
-        if (width == 0 && height == 0 && bitrate == 0) {
+        if (auto) {
             parametersBuilder.clearVideoSizeConstraints()
             parametersBuilder.setMaxVideoBitrate(Int.MAX_VALUE)
         }
         trackSelector.setParameters(parametersBuilder)
+    }
+
+    /** While the loader is up on a slow link, force the low rung instead of stalling on HD. */
+    private fun capAbrForSlowBuffer() {
+        if (manualBitrateLock) return
+        val estimate = bandwidthMeter.bitrateEstimate
+        if (estimate > ABR_INITIAL_BITRATE_ESTIMATE) return
+        val parametersBuilder = trackSelector.buildUponParameters()
+        parametersBuilder.setMaxVideoBitrate(ABR_INITIAL_BITRATE_ESTIMATE.toInt())
+        trackSelector.setParameters(parametersBuilder)
+        abrCappedForBuffer = true
+    }
+
+    /** Fast link after a stall: let ABR climb again. */
+    private fun releaseAbrCapIfLinkRecovered() {
+        if (!abrCappedForBuffer || manualBitrateLock) return
+        if (bandwidthMeter.bitrateEstimate <= ABR_INITIAL_BITRATE_ESTIMATE * 2) return
+        val parametersBuilder = trackSelector.buildUponParameters()
+        parametersBuilder.setMaxVideoBitrate(Int.MAX_VALUE)
+        trackSelector.setParameters(parametersBuilder)
+        abrCappedForBuffer = false
     }
 
     fun seekTo(location: Int) {

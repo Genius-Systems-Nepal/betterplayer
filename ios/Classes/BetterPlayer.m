@@ -301,10 +301,19 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
             _eventSink(@{@"event" : @"bitrateUpdate", @"values" : [NSNumber numberWithInt:(int)lastBitRate]});
         }
     }
-    // Once AVPlayer reports a variant, lift the startup peak so ABR can upshift.
-    if (_autoAbrPendingUnlock && lastEventNumber > 0) {
-        [self unlockAutoAbrIfNeeded];
+}
+
+- (void)capAutoAbrWhileWaiting {
+    if (_player.currentItem == nil) {
+        return;
     }
+    double peak = _player.currentItem.preferredPeakBitRate;
+    // A specific rendition is locked; do not override a manual quality choice.
+    if (peak > 0 && peak != kAbrStartupPeakBitRate) {
+        return;
+    }
+    _autoAbrPendingUnlock = YES;
+    _player.currentItem.preferredPeakBitRate = kAbrStartupPeakBitRate;
 }
 
 - (void)unlockAutoAbrIfNeeded {
@@ -723,6 +732,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                 [self unlockAutoAbrIfNeeded];
                 [self sendBufferingEnd];
             } else if (status == AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate) {
+                [self capAutoAbrWhileWaiting];
                 [self sendBufferingStart];
             }
         }
