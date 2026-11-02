@@ -268,10 +268,20 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           break;
 
         case VideoEventType.play:
-          play();
+          // While system PiP owns the AVPlayer, only sync local state — calling
+          // play()/pause() again races the PiP controls and can freeze resume.
+          if (value.isPip) {
+            value = value.copyWith(isPlaying: true);
+          } else {
+            play();
+          }
           break;
         case VideoEventType.pause:
-          pause();
+          if (value.isPip) {
+            value = value.copyWith(isPlaying: false);
+          } else {
+            pause();
+          }
           break;
         case VideoEventType.seek:
           seekTo(event.position);
@@ -280,14 +290,16 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           value = value.copyWith(isPip: true);
           break;
         case VideoEventType.pipStop:
+          // Keep isPlaying if native immediately resumes after expand-to-app.
+          // A teardown pause must not force platform pause once isPip clears.
           value = value.copyWith(isPip: false);
           break;
         case VideoEventType.nerdStat:
-          value = value.copyWith(isPip: false, nerdStatValue: event.nerdStat);
+          // Do not clear isPip — bitrate/nerd ticks must not end a PiP session.
+          value = value.copyWith(nerdStatValue: event.nerdStat);
           break;
         case VideoEventType.bitrateUpdate:
-          value =
-              value.copyWith(isPip: false, bitrateValue: event.bitrateUpdate);
+          value = value.copyWith(bitrateValue: event.bitrateUpdate);
           break;
         case VideoEventType.unknown:
           break;
@@ -669,6 +681,11 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
         textureId, top, left, width, height);
   }
 
+  /// Android mini → background: arm native onUserLeaveHint / auto-enter PiP.
+  Future<void> setPipEnterOnLeave(bool enabled) async {
+    await _videoPlayerPlatform.setPipEnterOnLeave(textureId, enabled);
+  }
+
   Future<void> disablePictureInPicture() async {
     await _videoPlayerPlatform.disablePictureInPicture(textureId);
   }
@@ -685,6 +702,14 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
       return false;
     }
     return _videoPlayerPlatform.isPictureInPictureEnabled(_textureId);
+  }
+
+  /// Android Activity.isInPictureInPictureMode (not the video isPip event).
+  Future<bool?> isActivityInPictureInPictureMode() async {
+    if (_textureId == null) {
+      return false;
+    }
+    return _videoPlayerPlatform.isActivityInPictureInPictureMode(_textureId);
   }
 
   Future<bool?> checkPipPermission() async {

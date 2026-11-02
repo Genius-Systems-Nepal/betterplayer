@@ -191,6 +191,12 @@ bool _remoteCommandsInitialized = false;
 }
 
 - (void) setupRemoteCommandNotification:(BetterPlayer*)player, NSString* title, NSString* author , NSString* imageUrl{
+    // Do not keep publishing Now Playing while paused — that leaves Dynamic Island
+    // / lock-screen media after expanded background pause.
+    if (player == nil || !player.isPlaying) {
+        [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = @{};
+        return;
+    }
     float positionInSeconds = player.position /1000;
     float durationInSeconds = player.duration/ 1000;
 
@@ -446,6 +452,11 @@ bool _remoteCommandsInitialized = false;
             double width = [argsMap[@"width"] doubleValue];
             double height = [argsMap[@"height"] doubleValue];
             [player enablePictureInPicture:CGRectMake(left, top, width, height)];
+            result(nil);
+        } else if ([@"setPipEnterOnLeave" isEqualToString:call.method]){
+            BOOL enabled = [argsMap[@"enabled"] boolValue];
+            [player setPipEnterOnLeave:enabled];
+            result(nil);
         } else if ([@"isPictureInPictureSupported" isEqualToString:call.method]){
             if (@available(iOS 9.0, *)){
                 if ([AVPictureInPictureController isPictureInPictureSupported]){

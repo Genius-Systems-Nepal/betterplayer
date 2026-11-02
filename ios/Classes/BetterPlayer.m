@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #import "BetterPlayer.h"
+#import <UIKit/UIKit.h>
+#import <MediaPlayer/MediaPlayer.h>
 #import <better_player/better_player-Swift.h>
 
 static void* timeRangeContext = &timeRangeContext;
@@ -55,7 +57,7 @@ static NSString* BetterPlayerCertificateUrlPreview(NSString* certificateUrl) {
 
 
 #if TARGET_OS_IOS
-void (^__strong _Nonnull _restoreUserInterfaceForPIPStopCompletionHandler)(BOOL);
+void (^__strong _Nullable _restoreUserInterfaceForPIPStopCompletionHandler)(BOOL);
 API_AVAILABLE(ios(9.0))
 AVPictureInPictureController *_pipController;
 #endif
@@ -70,12 +72,27 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     BetterPlayerVuDrmAssetsLoaderDelegate *_vuDrmAssetsloaderDelegate;
     BOOL nerdStatActive;
     double lastBitRate;
+    /// YES while PiP should keep playing across app background (same as in-app).
+    BOOL _pipDesiredPlaying;
+    /// Mini-only: allow automatic AV PiP when leaving the app (mirrors Android).
+    BOOL _pipEnterOnLeave;
+    BOOL _appInBackground;
+    /// YES between willStop and cleanup — ignore teardown pause events.
+    BOOL _pipStopping;
+    /// User expanded PiP back into the app (restore UI), not dismissed with X.
+    BOOL _pipExpandingToApp;
+    /// Resume in-app playback after PiP stop when expanding while playing.
+    BOOL _pipResumeAfterStop;
     /// YES after Auto (0x0x0) until buffer is healthy and peak cap is cleared.
     BOOL _autoAbrPendingUnlock;
     NSInteger _liveEdgeRecoverCount;
     NSTimeInterval _lastLiveEdgeRecoverAt;
     /// Set once we observe indefinite duration (live HLS/DASH).
     BOOL _isLiveStream;
+    /// Latest explicit PiP start. Older retry chains must not keep rebinding.
+    NSInteger _pipStartGeneration;
+    /// Grace timer already scheduled for this background transition.
+    BOOL _pipFailWatchArmed;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame dictQuanteecConfig:(NSDictionary * _Nullable)dictQuanteecConfig {
@@ -84,6 +101,12 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     _isInitialized = false;
     _isPlaying = false;
     _disposed = false;
+    _pipDesiredPlaying = false;
+    _pipEnterOnLeave = false;
+    _appInBackground = false;
+    _pipStopping = false;
+    _pipExpandingToApp = false;
+    _pipResumeAfterStop = false;
     _player = [[AVPlayer alloc] init];
 
     //TODO: handle quanteec when package available
@@ -108,11 +131,81 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     }
 
     self._observersAdded = false;
+#if TARGET_OS_IOS
+    [self registerAppLifecycleObservers];
+#endif
     _liveEdgeRecoverCount = 0;
     _lastLiveEdgeRecoverAt = 0;
     _isLiveStream = NO;
     return self;
 }
+
+#if TARGET_OS_IOS
+- (void)registerAppLifecycleObservers {
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    // removeObserver:self also clears these; re-add after player item observer churn.
+    [center removeObserver:self name:UIApplicationWillResignActiveNotification object:nil];
+    [center removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
+    [center removeObserver:self name:UIApplicationDidEnterBackgroundNotification object:nil];
+    if (@available(iOS 11.0, *)) {
+        [center removeObserver:self name:UIScreenCapturedDidChangeNotification object:nil];
+    }
+    [center addObserver:self
+               selector:@selector(applicationWillResignActive:)
+                   name:UIApplicationWillResignActiveNotification
+                 object:nil];
+    [center addObserver:self
+               selector:@selector(applicationDidBecomeActive:)
+                   name:UIApplicationDidBecomeActiveNotification
+                 object:nil];
+    [center addObserver:self
+               selector:@selector(applicationDidEnterBackground:)
+                   name:UIApplicationDidEnterBackgroundNotification
+                 object:nil];
+    if (@available(iOS 11.0, *)) {
+        [center addObserver:self
+                   selector:@selector(screenCaptureDidChange:)
+                       name:UIScreenCapturedDidChangeNotification
+                     object:nil];
+        // Arm immediately if capture already active (e.g. mid-session).
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+        }
+    }
+}
+
+/// Stop playback and system PiP when the screen is recorded/mirrored (no FLAG_SECURE on iOS).
+- (void)forcePauseForScreenCapture {
+    if (_disposed) {
+        return;
+    }
+    _pipDesiredPlaying = NO;
+    _pipExpandingToApp = NO;
+    _pipResumeAfterStop = NO;
+    _isPlaying = false;
+    if (@available(iOS 9.0, *)) {
+        if (_pipController != nil && [_pipController isPictureInPictureActive]) {
+            self._pictureInPicture = NO;
+            [_pipController stopPictureInPicture];
+        }
+    }
+    if (_player != nil) {
+        [_player pause];
+    }
+    if (_eventSink != nil) {
+        _eventSink(@{@"event" : @"pause"});
+    }
+}
+
+- (void)screenCaptureDidChange:(NSNotification *)notification {
+    if (@available(iOS 11.0, *)) {
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+        }
+        // Capture ended: leave paused — user must resume.
+    }
+}
+#endif
 
 /// Live when duration is indefinite, or we previously observed a live item this session.
 - (BOOL)isLikelyLiveItem:(AVPlayerItem *)item {
@@ -329,6 +422,8 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
 - (void)clear {
     _isInitialized = false;
     _isPlaying = false;
+    _pipDesiredPlaying = false;
+    _pipEnterOnLeave = false;
     _disposed = false;
     _failedCount = 0;
     _key = nil;
@@ -374,6 +469,9 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
                                       context:playbackBufferFullContext];
         [[NSNotificationCenter defaultCenter] removeObserver:self];
         self._observersAdded = false;
+#if TARGET_OS_IOS
+        [self registerAppLifecycleObservers];
+#endif
     }
 }
 
@@ -637,14 +735,33 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                        context:(void*)context {
 
     if ([path isEqualToString:@"rate"]) {
+        BOOL pipActive = NO;
         if (@available(iOS 10.0, *)) {
-            if (_pipController.pictureInPictureActive == true){
+            pipActive = _pipController != nil && _pipController.pictureInPictureActive == YES;
+            if (pipActive){
                 if (_lastAvPlayerTimeControlStatus != [NSNull null] && _lastAvPlayerTimeControlStatus == _player.timeControlStatus){
                     return;
                 }
 
                 if (_player.timeControlStatus == AVPlayerTimeControlStatusPaused){
+                    // Expanding PiP → in-app: ignore teardown pause (restore UI /
+                    // willStop run around the same time as this rate change).
+                    if (_pipExpandingToApp || (_pipStopping && _pipResumeAfterStop)) {
+                        return;
+                    }
+                    // App background/inactive often forces AVPlayer pause before our
+                    // lifecycle flag is set. Resume if PiP should keep playing.
+                    UIApplicationState appState = [UIApplication sharedApplication].applicationState;
+                    BOOL leavingForeground = _appInBackground || appState != UIApplicationStateActive;
+                    if (_pipDesiredPlaying && leavingForeground) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [self keepPipPlayingIfNeeded];
+                        });
+                        return;
+                    }
                     _lastAvPlayerTimeControlStatus = _player.timeControlStatus;
+                    _isPlaying = false;
+                    _pipDesiredPlaying = false;
                     if (_eventSink != nil) {
                       _eventSink(@{@"event" : @"pause"});
                     }
@@ -653,14 +770,20 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                 }
                 if (_player.timeControlStatus == AVPlayerTimeControlStatusPlaying){
                     _lastAvPlayerTimeControlStatus = _player.timeControlStatus;
+                    _isPlaying = true;
+                    _pipDesiredPlaying = true;
                     if (_eventSink != nil) {
                       _eventSink(@{@"event" : @"play"});
                     }
+                    return;
                 }
+                return;
             }
         }
 
-        if (_player.rate == 0 && //if player rate dropped to 0
+        // Do not treat intentional PiP pause as a stall.
+        if (!pipActive &&
+            _player.rate == 0 && //if player rate dropped to 0
             CMTIME_COMPARE_INLINE(_player.currentItem.currentTime, >, kCMTimeZero) && //if video was started
             CMTIME_COMPARE_INLINE(_player.currentItem.currentTime, <, _player.currentItem.duration) && //but not yet finished
             _isPlaying) { //instance variable to handle overall state (changed to YES when user triggers playback)
@@ -833,10 +956,27 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (_isAdsPlaying == TRUE) {
         return;
     }
+#if TARGET_OS_IOS
+    if (@available(iOS 11.0, *)) {
+        // Do not start (or arm PiP) while screen capture is active.
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+            return;
+        }
+    }
+#endif
     _stalledCount = 0;
     _isStalledCheckStarted = false;
     _isPlaying = true;
+    _pipDesiredPlaying = true;
     [self updatePlayingState];
+#if TARGET_OS_IOS
+    // Only prepare automatic PiP when mini (or explicit arm) requested it.
+    if (_pipEnterOnLeave) {
+        NSLog(@"[pip-arm] play rebind thisView=%d", _thisView != nil ? 1 : 0);
+        [self ensurePipPreparedForAutomaticStart];
+    }
+#endif
 }
 
 - (void)pause {
@@ -844,8 +984,39 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (_isAdsPlaying == TRUE) {
         return;
     }
+#if TARGET_OS_IOS
+    BOOL leavingForeground = NO;
+    if (@available(iOS 11.0, *)) {
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+            return;
+        }
+    }
+    // Flutter/engine often pauses on inactive. If mini armed us for background
+    // PiP, start/keep system PiP instead of Dynamic Island audio-only.
+    // Expanded (normal/landscape) must allow a real pause — no auto PiP.
+    UIApplicationState appState = [UIApplication sharedApplication].applicationState;
+    leavingForeground = _appInBackground || appState != UIApplicationStateActive;
+    if (_pipEnterOnLeave && _pipDesiredPlaying && leavingForeground) {
+        if ([self isPipActive]) {
+            [self keepPipPlayingIfNeeded];
+            return;
+        }
+        // Home uses automatic inline PiP. startPictureInPicture during
+        // resign returns -1001 and cancels that transition.
+        NSLog(@"[pip-arm] pause leaving foreground armed — leave automatic PiP");
+        return;
+    }
+#endif
     _isPlaying = false;
+    _pipDesiredPlaying = false;
     [self updatePlayingState];
+#if TARGET_OS_IOS
+    // Expanded background pause: drop Now Playing so Island / lock media clear.
+    if (leavingForeground && !_pipEnterOnLeave) {
+        [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = @{};
+    }
+#endif
 }
 
 - (int64_t)position {
@@ -942,9 +1113,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     self._pictureInPicture = pictureInPicture;
     if (@available(iOS 9.0, *)) {
         if (_pipController && self._pictureInPicture && ![_pipController isPictureInPictureActive]) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [_pipController startPictureInPicture];
-            });
+            [self startPictureInPictureNow];
         } else if (_pipController && !self._pictureInPicture && [_pipController isPictureInPictureActive]) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [_pipController stopPictureInPicture];
@@ -1015,57 +1184,451 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     }
 }
 
+- (BOOL)_isOverlayPipLayer:(AVPlayerLayer *)layer {
+    return layer != nil && _thisView != nil && layer != _thisView.playerLayer;
+}
+
+- (void)_removeOverlayPipLayerIfNeeded {
+    if ([self _isOverlayPipLayer:self._playerLayer]) {
+        [self._playerLayer removeFromSuperlayer];
+        self._playerLayer = nil;
+    }
+}
+
+- (void)_logPipReadiness:(NSString *)where {
+    AVPlayerLayer *layer = _thisView != nil ? _thisView.playerLayer : nil;
+    CGSize bounds = layer != nil ? layer.bounds.size : CGSizeZero;
+    BOOL ready = layer != nil && layer.isReadyForDisplay;
+    BOOL inWindow = _thisView.window != nil;
+    float rate = _player != nil ? _player.rate : 0;
+    NSInteger status = -1;
+    if (@available(iOS 10.0, *)) {
+        status = _player != nil ? (NSInteger)_player.timeControlStatus : -1;
+    }
+    BOOL possible = NO;
+    if (@available(iOS 9.0, *)) {
+        possible = _pipController != nil && _pipController.isPictureInPicturePossible;
+    }
+    NSLog(@"[pip-arm] %@ self=%p possible=%d rate=%.2f status=%ld ready=%d bounds=%.0fx%.0f window=%d app=%ld enter=%d playing=%d pip=%d",
+          where,
+          self,
+          possible ? 1 : 0,
+          rate,
+          (long)status,
+          ready ? 1 : 0,
+          bounds.width,
+          bounds.height,
+          inWindow ? 1 : 0,
+          (long)[UIApplication sharedApplication].applicationState,
+          _pipEnterOnLeave ? 1 : 0,
+          _isPlaying ? 1 : 0,
+          [self isPipActive] ? 1 : 0);
+}
+
+/// Bind PiP to the inline platform-view AVPlayerLayer (not a second root overlay).
+/// Overlay layers caused duplicate video frames and broke mini → background PiP.
+- (void)bindPipToInlinePlayerLayer {
+    if (_disposed || !_player || !_thisView) {
+        NSLog(@"[pip-arm] bindPip skip disposed=%d player=%d thisView=%d",
+              _disposed ? 1 : 0, _player != nil ? 1 : 0, _thisView != nil ? 1 : 0);
+        return;
+    }
+    NSLog(@"[pip-arm] bindPip thisView OK");
+    [self _removeOverlayPipLayerIfNeeded];
+    self._playerLayer = _thisView.playerLayer;
+    if (self._playerLayer.player != _player) {
+        self._playerLayer.player = _player;
+    }
+    [self setupPipController];
+}
+
 - (void)setupPipController {
     if (@available(iOS 9.0, *)) {
+        // Playback category is required for PiP to continue in background.
+        [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:nil];
         [[AVAudioSession sharedInstance] setActive: YES error: nil];
         [[UIApplication sharedApplication] beginReceivingRemoteControlEvents];
-        if (!_pipController && self._playerLayer && [AVPictureInPictureController isPictureInPictureSupported]) {
+        if (!self._playerLayer || ![AVPictureInPictureController isPictureInPictureSupported]) {
+            return;
+        }
+        // Controller is tied to one layer — recreate when the layer changes.
+        if (_pipController != nil && _pipController.playerLayer != self._playerLayer) {
+            _pipController.delegate = nil;
+            _pipController = nil;
+        }
+        if (!_pipController) {
+            NSLog(@"[pip-arm] pipController create self=%p", self);
             _pipController = [[AVPictureInPictureController alloc] initWithPlayerLayer:self._playerLayer];
             _pipController.delegate = self;
         }
+        [self _applyPipEnterOnLeaveToController];
     } else {
         // Fallback on earlier versions
     }
 }
 
+- (void)_releasePipController {
+    if (@available(iOS 9.0, *)) {
+        if (_pipController != nil) {
+            _pipController.delegate = nil;
+            _pipController = nil;
+            NSLog(@"[pip-arm] pipController released self=%p", self);
+        }
+    }
+}
+
+- (void)_applyPipEnterOnLeaveToController {
+    if (@available(iOS 14.2, *)) {
+        if (_pipController == nil) {
+            return;
+        }
+        // Mini-only: system auto-PiP when leaving. Expanded stays off.
+        _pipController.canStartPictureInPictureAutomaticallyFromInline = _pipEnterOnLeave;
+    }
+}
+
+/// Pause playback and drop Now Playing so Dynamic Island / media controls clear.
+- (void)pauseAndHideMediaSession {
+    if (_disposed) {
+        return;
+    }
+    _isPlaying = false;
+    _pipDesiredPlaying = false;
+    self._pictureInPicture = NO;
+    if (_player != nil) {
+        [_player pause];
+    }
+    [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = @{};
+    if (_eventSink != nil) {
+        _eventSink(@{@"event" : @"pause"});
+    }
+}
+
+/// Mini-only arm: allow automatic AV PiP when the app backgrounds.
+- (void)setPipEnterOnLeave:(BOOL)enabled {
+#if TARGET_OS_IOS
+    if (_disposed) {
+        NSLog(@"[pip-arm] native setPipEnterOnLeave ignored disposed enabled=%d self=%p",
+              enabled ? 1 : 0, self);
+        return;
+    }
+    _pipEnterOnLeave = enabled;
+    NSLog(@"[pip-arm] native setPipEnterOnLeave=%d playing=%d pipActive=%d thisView=%d",
+          enabled ? 1 : 0, _isPlaying ? 1 : 0, [self isPipActive] ? 1 : 0,
+          _thisView != nil ? 1 : 0);
+    if (enabled) {
+        [self ensurePipPreparedForAutomaticStart];
+        // Drag-to-mini arms before the new UiKitView exists. Retry once the
+        // inline layer is in the hierarchy; play() rebinds PiP when armed.
+        if (_thisView == nil) {
+            NSLog(@"[pip-arm] native arm thisView nil → retry in 0.35s");
+            __weak BetterPlayer *weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                BetterPlayer *strongSelf = weakSelf;
+                if (strongSelf == nil || strongSelf.disposed || !strongSelf->_pipEnterOnLeave) {
+                    NSLog(@"[pip-arm] native rebind skip alive=%d disposed=%d armed=%d",
+                          strongSelf != nil ? 1 : 0,
+                          strongSelf != nil && strongSelf.disposed ? 1 : 0,
+                          strongSelf != nil && strongSelf->_pipEnterOnLeave ? 1 : 0);
+                    return;
+                }
+                NSLog(@"[pip-arm] native rebind thisView=%d playing=%d desired=%d",
+                      strongSelf->_thisView != nil ? 1 : 0,
+                      strongSelf->_isPlaying ? 1 : 0,
+                      strongSelf->_pipDesiredPlaying ? 1 : 0);
+                [strongSelf ensurePipPreparedForAutomaticStart];
+                if (strongSelf->_isPlaying || strongSelf->_pipDesiredPlaying) {
+                    NSLog(@"[pip-arm] native rebind play()");
+                    [strongSelf play];
+                }
+            });
+        }
+    } else {
+        // Drop the controller. Flipping the automatic flag leaves iOS able to
+        // start PiP from the normal player after mini was restored.
+        if ([self isPipActive]) {
+            [self _applyPipEnterOnLeaveToController];
+        } else {
+            [self _releasePipController];
+        }
+    }
+#else
+    (void)enabled;
+#endif
+}
+
+/// Arm automatic video PiP from the inline player (no duplicate overlay layer).
+- (void)ensurePipPreparedForAutomaticStart {
+    if (@available(iOS 9.0, *)) {
+        if (_disposed || !_player || !_pipEnterOnLeave) {
+            return;
+        }
+        if (@available(iOS 11.0, *)) {
+            if (UIScreen.mainScreen.isCaptured) {
+                return;
+            }
+        }
+        if (![AVPictureInPictureController isPictureInPictureSupported]) {
+            return;
+        }
+        [self bindPipToInlinePlayerLayer];
+    }
+}
+
+- (BOOL)isPipActive {
+    if (@available(iOS 9.0, *)) {
+        return _pipController != nil && _pipController.pictureInPictureActive == YES;
+    }
+    return NO;
+}
+
+/// Keep AVPlayer running while system PiP is active (background must not pause it).
+- (void)keepPipPlayingIfNeeded {
+    if (_disposed || !_pipDesiredPlaying || ![self isPipActive]) {
+        return;
+    }
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:nil];
+    [[AVAudioSession sharedInstance] setActive:YES error:nil];
+    _isPlaying = true;
+    if (@available(iOS 10.0, *)) {
+        [_player playImmediatelyAtRate:(_playerRate > 0 ? _playerRate : 1.0)];
+    } else {
+        [_player play];
+        _player.rate = (_playerRate > 0 ? _playerRate : 1.0);
+    }
+}
+
+- (void)applicationWillResignActive:(NSNotification *)notification {
+    if (_disposed) {
+        return;
+    }
+    _appInBackground = YES;
+    if (@available(iOS 11.0, *)) {
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+            return;
+        }
+    }
+    if (_pipDesiredPlaying && [self isPipActive]) {
+        [self keepPipPlayingIfNeeded];
+        return;
+    }
+    // Armed mini: canStartPictureInPictureAutomaticallyFromInline is already
+    // set. Calling startPictureInPicture here returns -1001 and cancels it.
+    // Unarmed resign (Control Center) must not pause either.
+    if (_pipEnterOnLeave && (_pipDesiredPlaying || _isPlaying)) {
+        [self _logPipReadiness:@"willResignActive automatic"];
+    }
+}
+
+- (void)applicationDidEnterBackground:(NSNotification *)notification {
+    if (_disposed) {
+        return;
+    }
+    _appInBackground = YES;
+    [self _logPipReadiness:@"didEnterBackground"];
+    if (@available(iOS 11.0, *)) {
+        if (UIScreen.mainScreen.isCaptured) {
+            [self forcePauseForScreenCapture];
+            return;
+        }
+    }
+    // A live PiP window must keep playing even if arm flags were cleared
+    // by a racing pause/clear on the way to background.
+    if ([self isPipActive]) {
+        _pipEnterOnLeave = YES;
+        _pipDesiredPlaying = YES;
+        _isPlaying = YES;
+        NSLog(@"[pip-arm] didEnterBackground pip already active → keep");
+        [self keepPipPlayingIfNeeded];
+        return;
+    }
+    if (_pipEnterOnLeave && (_pipDesiredPlaying || _isPlaying)) {
+        // Automatic inline PiP owns this transition. Do not call
+        // startPictureInPicture from the background.
+        NSLog(@"[pip-arm] didEnterBackground armed, waiting for automatic PiP self=%p", self);
+        if (_pipFailWatchArmed) {
+            return;
+        }
+        _pipFailWatchArmed = YES;
+        __weak BetterPlayer *weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            BetterPlayer *strongSelf = weakSelf;
+            if (strongSelf == nil || strongSelf.disposed) {
+                return;
+            }
+            strongSelf->_pipFailWatchArmed = NO;
+            if ([strongSelf isPipActive]) {
+                NSLog(@"[pip-arm] didEnterBackground PiP active OK");
+                [strongSelf keepPipPlayingIfNeeded];
+                return;
+            }
+            UIApplicationState appState = [UIApplication sharedApplication].applicationState;
+            if (appState == UIApplicationStateActive) {
+                NSLog(@"[pip-arm] didEnterBackground grace skipped (foreground)");
+                return;
+            }
+            if (!strongSelf->_pipEnterOnLeave) {
+                return;
+            }
+            [strongSelf _logPipReadiness:@"didEnterBackground PiP FAILED"];
+            [strongSelf pauseAndHideMediaSession];
+        });
+        return;
+    }
+    // Expanded normal/landscape: no PiP — pause and clear Now Playing / Island.
+    NSLog(@"[pip-arm] didEnterBackground unarmed → pauseAndHide self=%p", self);
+    if (_isPlaying || _pipDesiredPlaying) {
+        [self pauseAndHideMediaSession];
+    } else {
+        [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = @{};
+    }
+}
+
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    _appInBackground = NO;
+    _pipStartGeneration = 0;
+    // Drop any leftover root overlay from older PiP paths (dual-frame bug).
+    [self _removeOverlayPipLayerIfNeeded];
+    // Expand-from-PiP: layer frame is still the PiP window until layout.
+    [_thisView setNeedsLayout];
+    if (_pipDesiredPlaying && [self isPipActive]) {
+        [self keepPipPlayingIfNeeded];
+    }
+}
+
 - (void) enablePictureInPicture: (CGRect) frame{
-    [self disablePictureInPicture];
-    [self usePlayerLayer:frame];
+    // Frame is unused — PiP must use the inline platform-view layer. Creating a
+    // second root AVPlayerLayer stacked a "big" video over the mini player.
+    (void)frame;
+    BOOL desiredPlaying = _pipDesiredPlaying || _isPlaying;
+    if (desiredPlaying) {
+        _pipDesiredPlaying = YES;
+        _isPlaying = YES;
+    }
+    [self bindPipToInlinePlayerLayer];
+    [self startPictureInPictureNow];
 }
 
 - (void)usePlayerLayer: (CGRect) frame
 {
-    if( _player )
-    {
-        // Create new controller passing reference to the AVPlayerLayer
-        self._playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
-        UIViewController* vc = [[[UIApplication sharedApplication] keyWindow] rootViewController];
-        self._playerLayer.frame = frame;
-        self._playerLayer.needsDisplayOnBoundsChange = YES;
-        //  [self._playerLayer addObserver:self forKeyPath:readyForDisplayKeyPath options:NSKeyValueObservingOptionNew context:nil];
-        [vc.view.layer addSublayer:self._playerLayer];
-        vc.view.layer.needsDisplayOnBoundsChange = YES;
-        if (@available(iOS 9.0, *)) {
-            _pipController = NULL;
+    (void)frame;
+    [self enablePictureInPicture:CGRectZero];
+}
+
+- (void)startPictureInPictureNow {
+    if (@available(iOS 9.0, *)) {
+        if (@available(iOS 11.0, *)) {
+            if (UIScreen.mainScreen.isCaptured) {
+                [self forcePauseForScreenCapture];
+                return;
+            }
         }
-        [self setupPipController];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)),
+        if (_pipStartGeneration > 0) {
+            NSLog(@"[pip-arm] startPictureInPictureNow ignored, gen=%ld already in flight self=%p",
+                  (long)_pipStartGeneration, self);
+            return;
+        }
+        _pipStartGeneration += 1;
+        NSInteger generation = _pipStartGeneration;
+        NSLog(@"[pip-arm] startPictureInPictureNow gen=%ld self=%p", (long)generation, self);
+        [self _tryStartPictureInPictureAttempt:0 generation:generation];
+    }
+}
+
+- (void)_tryStartPictureInPictureAttempt:(NSInteger)attempt generation:(NSInteger)generation {
+    if (@available(iOS 9.0, *)) {
+        if (_disposed || generation != _pipStartGeneration) {
+            return;
+        }
+        if (_pipController == nil) {
+            [self bindPipToInlinePlayerLayer];
+        }
+        if (_pipController == nil) {
+            NSLog(@"[pip-arm] startAttempt %ld no controller", (long)attempt);
+            return;
+        }
+        self._pictureInPicture = YES;
+        if (_pipController.isPictureInPictureActive) {
+            return;
+        }
+        // possible stays NO while AVPlayer.rate is 0, even if Dart still
+        // thinks playback is running. Kick the player before giving up.
+        if (_player != nil && _player.rate < 0.05 && (_isPlaying || _pipDesiredPlaying)) {
+            if (@available(iOS 10.0, *)) {
+                [_player playImmediatelyAtRate:(_playerRate > 0 ? _playerRate : 1.0)];
+            } else {
+                [_player play];
+            }
+        }
+        [self _logPipReadiness:[NSString stringWithFormat:@"startAttempt %ld", (long)attempt]];
+        if (_pipController.isPictureInPicturePossible) {
+            NSLog(@"[pip-arm] startPictureInPicture called attempt=%ld", (long)attempt);
+            [_pipController startPictureInPicture];
+            return;
+        }
+        // Layer may need a couple of layout passes before possible == YES.
+        // Do not bind again here — a new controller resets possible to NO.
+        if (attempt >= 12) {
+            NSLog(@"[pip-arm] startAttempt gave up gen=%ld", (long)generation);
+            return;
+        }
+        __weak BetterPlayer *weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            [self setPictureInPicture:true];
+            BetterPlayer *strongSelf = weakSelf;
+            if (strongSelf == nil || strongSelf.disposed) {
+                return;
+            }
+            [strongSelf _tryStartPictureInPictureAttempt:attempt + 1 generation:generation];
         });
     }
 }
 
 - (void)disablePictureInPicture
 {
-    [self setPictureInPicture:true];
-    if (__playerLayer){
-        [self._playerLayer removeFromSuperlayer];
-        self._playerLayer = nil;
-        if (_eventSink != nil) {
-            _eventSink(@{@"event" : @"pipStop"});
-        }
+    [self disablePictureInPictureKeepIntent:NO];
+}
+
+- (void)disablePictureInPictureKeepIntent:(BOOL)keepIntent
+{
+    // Must pass NO to stop an active PiP session. Passing YES was a long-standing
+    // bug that left system PiP running and blocked new playback handoff.
+    BOOL resumeAfterStop = _pipResumeAfterStop;
+    BOOL desiredPlaying = _pipDesiredPlaying || _isPlaying;
+    _pipStopping = YES;
+    [self setPictureInPicture:false];
+    // Never remove the inline BetterPlayerView layer — only leftover overlays.
+    [self _removeOverlayPipLayerIfNeeded];
+    // PiP moves the layer frame; put it back on the Flutter view bounds.
+    [_thisView setNeedsLayout];
+    if (!keepIntent && _eventSink != nil) {
+        _eventSink(@{@"event" : @"pipStop"});
     }
+    if (resumeAfterStop) {
+        // Expanding PiP → in-app: keep the same playing state.
+        _isPlaying = YES;
+        _pipDesiredPlaying = NO;
+        if (@available(iOS 10.0, *)) {
+            [_player playImmediatelyAtRate:(_playerRate > 0 ? _playerRate : 1.0)];
+        } else {
+            [_player play];
+            _player.rate = (_playerRate > 0 ? _playerRate : 1.0);
+        }
+        if (_eventSink != nil) {
+            _eventSink(@{@"event" : @"play"});
+        }
+    } else if (keepIntent) {
+        _pipDesiredPlaying = desiredPlaying;
+        _isPlaying = desiredPlaying;
+    } else {
+        _pipDesiredPlaying = NO;
+    }
+    _pipStopping = NO;
+    _pipResumeAfterStop = NO;
+    _pipExpandingToApp = NO;
 }
 #endif
 
@@ -1078,10 +1641,26 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (_eventSink != nil) {
         _eventSink(@{@"event" : @"pipStart"});
     }
+    // Entered PiP while playing — keep that state across app background.
+    _pipDesiredPlaying = YES;
+    _isPlaying = YES;
+    _pipStopping = NO;
+    _pipExpandingToApp = NO;
+    _pipResumeAfterStop = NO;
+    // Only nudge leftover overlay layers off-screen — never move the inline view.
+    if ([self _isOverlayPipLayer:self._playerLayer]) {
+        self._playerLayer.frame = CGRectMake(-3.0, -3.0, 1.0, 1.0);
+    }
+    [self keepPipPlayingIfNeeded];
 }
 
 - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController  API_AVAILABLE(ios(9.0)){
-
+    _pipStopping = YES;
+    // Only resume in-app when the user expands PiP back (restore UI), not when
+    // dismissing PiP with X or when Flutter ends the session for handoff.
+    if (_pipExpandingToApp && (_pipDesiredPlaying || _isPlaying)) {
+        _pipResumeAfterStop = YES;
+    }
 }
 
 - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
@@ -1089,11 +1668,28 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 }
 
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController failedToStartPictureInPictureWithError:(NSError *)error {
-
+    NSLog(@"[pip-arm] failedToStart %@ code=%ld %@",
+          error.domain, (long)error.code, error.localizedDescription);
+    [self _removeOverlayPipLayerIfNeeded];
+    self._pictureInPicture = NO;
 }
 
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL))completionHandler {
-    [self setRestoreUserInterfaceForPIPStopCompletionHandler: true];
+    _pipExpandingToApp = YES;
+    // Capture play intent as early as possible (before teardown pause).
+    if (_pipDesiredPlaying || _isPlaying) {
+        _pipResumeAfterStop = YES;
+    }
+    // Must invoke Apple's handler. The previous code never stored it, so iOS
+    // restored audio without putting video back on the inline layer.
+    _restoreUserInterfaceForPIPStopCompletionHandler = [completionHandler copy];
+    if (_thisView != nil && _player != nil && _thisView.playerLayer.player != _player) {
+        _thisView.playerLayer.player = _player;
+    }
+    [_thisView setNeedsLayout];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self setRestoreUserInterfaceForPIPStopCompletionHandler:YES];
+    });
 }
 
 - (void) setAudioTrack:(NSString*) name index:(int) index{
@@ -1160,12 +1756,24 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 - (void)dispose {
     [nerdStatTimer invalidate];
     nerdStatTimer = nil;
+    // Clear the arm first so pause() does not treat this as a Home transition.
+    _pipEnterOnLeave = false;
+    _pipDesiredPlaying = false;
     [self pause];
     [self disposeSansEventChannel];
     [_eventChannel setStreamHandler:nil];
     [self disablePictureInPicture];
     [self setPictureInPicture:false];
     _disposed = true;
+#if TARGET_OS_IOS
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center removeObserver:self name:UIApplicationWillResignActiveNotification object:nil];
+    [center removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
+    [center removeObserver:self name:UIApplicationDidEnterBackgroundNotification object:nil];
+    if (@available(iOS 11.0, *)) {
+        [center removeObserver:self name:UIScreenCapturedDidChangeNotification object:nil];
+    }
+#endif
 }
 
 @end

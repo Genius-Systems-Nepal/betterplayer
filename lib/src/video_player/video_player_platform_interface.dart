@@ -145,6 +145,11 @@ abstract class VideoPlayerPlatform {
         'enablePictureInPicture() has not been implemented.');
   }
 
+  /// Android: arm system PiP for the next user-leave (mini → background).
+  Future<void> setPipEnterOnLeave(int? textureId, bool enabled) {
+    throw UnimplementedError('setPipEnterOnLeave() has not been implemented.');
+  }
+
   ///Disables PiP mode.
   Future<void> disablePictureInPicture(int? textureId) {
     throw UnimplementedError(
@@ -154,6 +159,12 @@ abstract class VideoPlayerPlatform {
   Future<bool?> isPictureInPictureEnabled(int? textureId) {
     throw UnimplementedError(
         'isPictureInPictureEnabled() has not been implemented.');
+  }
+
+  /// Android: true only when the Activity is currently in system PiP.
+  Future<bool?> isActivityInPictureInPictureMode(int? textureId) {
+    throw UnimplementedError(
+        'isActivityInPictureInPictureMode() has not been implemented.');
   }
 
   Future<bool?> checkPipPermission(int? textureId) {

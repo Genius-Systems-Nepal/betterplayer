@@ -1039,14 +1039,24 @@ class BetterPlayerController {
       if (Platform.isAndroid) {
         _wasInFullScreenBeforePiP = _isFullScreen;
         await videoPlayerController?.enablePictureInPicture(left: 0, top: 0, width: 0, height: 0);
-        enterFullScreen();
+        // Do not enterFullScreen() here — that pushes a Flutter fullscreen
+        // route via openFullscreen. With custom app fullscreen (NPL/details
+        // landscape), the BetterPlayer element is often disposed during the
+        // PiP/orientation rebuild and Navigator.of(context) null-checks.
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.pipStart));
         return;
       }
       if (Platform.isIOS) {
-        final RenderBox? renderBox = betterPlayerGlobalKey.currentContext!.findRenderObject() as RenderBox?;
-        if (renderBox == null) {
-          BetterPlayerUtils.log("Can't show PiP. RenderBox is null. Did you provide valid global"
+        final BuildContext? pipContext = betterPlayerGlobalKey.currentContext;
+        if (pipContext == null) {
+          BetterPlayerUtils.log("Can't show PiP. GlobalKey context is null.");
+          return;
+        }
+        final RenderBox? renderBox = pipContext.findRenderObject() as RenderBox?;
+        if (renderBox == null || !renderBox.hasSize ||
+            renderBox.size.width <= 0 ||
+            renderBox.size.height <= 0) {
+          BetterPlayerUtils.log("Can't show PiP. RenderBox is null or empty. Did you provide valid global"
               " key?");
           return;
         }
