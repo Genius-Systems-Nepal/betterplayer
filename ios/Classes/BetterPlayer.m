@@ -1257,6 +1257,16 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     }
 }
 
+- (void)_releasePipController {
+    if (@available(iOS 9.0, *)) {
+        if (_pipController != nil) {
+            _pipController.delegate = nil;
+            _pipController = nil;
+            NSLog(@"[pip-arm] pipController released self=%p", self);
+        }
+    }
+}
+
 - (void)_applyPipEnterOnLeaveToController {
     if (@available(iOS 14.2, *)) {
         if (_pipController == nil) {
@@ -1325,7 +1335,13 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
             });
         }
     } else {
-        [self _applyPipEnterOnLeaveToController];
+        // Drop the controller. Flipping the automatic flag leaves iOS able to
+        // start PiP from the normal player after mini was restored.
+        if ([self isPipActive]) {
+            [self _applyPipEnterOnLeaveToController];
+        } else {
+            [self _releasePipController];
+        }
     }
 #else
     (void)enabled;
