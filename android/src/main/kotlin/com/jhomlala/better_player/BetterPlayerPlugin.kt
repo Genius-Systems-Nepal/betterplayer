@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -51,6 +52,14 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     /// so Flutter lifecycle delays do not leave audio-only notification playback.
     private var pipEnterOnLeave = false
     private var pipLeavePlayer: BetterPlayer? = null
+
+    /// Last Flutter player bounds (px) for [PictureInPictureParams.setSourceRectHint].
+    private var lastPipSourceRect: Rect? = null
+
+    /// At most one surface refresh per PiP enter (multi-refresh caused visible flicker).
+    private var pipRefreshScheduled = false
+    private val pipRefreshHandler = Handler(Looper.getMainLooper())
+
     override fun onAttachedToEngine(binding: FlutterPluginBinding) {
         val loader = FlutterLoader()
         flutterState = FlutterState(
@@ -185,6 +194,16 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             else -> {
                 val textureId = (call.argument<Any>(TEXTURE_ID_PARAMETER) as Number?)?.toLong() ?: 0L
                 val player = videoPlayers[textureId]
+                // Disarm auto-enter even when the Dart controller is already gone —
+                // otherwise Home still enters PiP from a stopped details page.
+                if (player == null &&
+                    call.method == SET_PIP_ENTER_ON_LEAVE_METHOD &&
+                    call.argument<Boolean>("enabled") != true
+                ) {
+                    setPipEnterOnLeave(false, null)
+                    result.success(null)
+                    return
+                }
                 if (player == null) {
                     result.error(
                         "Unknown textureId",
@@ -256,7 +275,11 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 result.success(null)
             }
             ENABLE_PICTURE_IN_PICTURE_METHOD -> {
-                enablePictureInPicture(player)
+                val left = call.argument<Double>("left") ?: 0.0
+                val top = call.argument<Double>("top") ?: 0.0
+                val width = call.argument<Double>("width") ?: 0.0
+                val height = call.argument<Double>("height") ?: 0.0
+                enablePictureInPicture(player, left, top, width, height)
                 result.success(null)
             }
             SET_PIP_ENTER_ON_LEAVE_METHOD -> {
@@ -561,15 +584,8 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         pipLeavePlayer = if (enabled) player else null
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val act = activity ?: return
-        val builder = PictureInPictureParams.Builder()
-            .setAspectRatio(Rational(16, 9))
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // System enters PiP as soon as the user leaves — no Flutter round-trip.
-            builder.setAutoEnterEnabled(enabled)
-            builder.setSeamlessResizeEnabled(true)
-        }
         try {
-            act.setPictureInPictureParams(builder.build())
+            act.setPictureInPictureParams(buildPipParams(autoEnter = enabled))
         } catch (_: Exception) {
         }
         if (enabled && player != null) {
@@ -579,6 +595,37 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             } catch (_: Exception) {
             }
         }
+    }
+
+    private fun rememberSourceRect(
+        leftDp: Double,
+        topDp: Double,
+        widthDp: Double,
+        heightDp: Double
+    ) {
+        if (widthDp <= 0.0 || heightDp <= 0.0) return
+        val act = activity ?: return
+        val density = act.resources.displayMetrics.density
+        val l = (leftDp * density).toInt()
+        val t = (topDp * density).toInt()
+        val r = ((leftDp + widthDp) * density).toInt()
+        val b = ((topDp + heightDp) * density).toInt()
+        if (r <= l || b <= t) return
+        lastPipSourceRect = Rect(l, t, r, b)
+    }
+
+    private fun buildPipParams(autoEnter: Boolean = pipEnterOnLeave): PictureInPictureParams {
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+        val hint = lastPipSourceRect
+        if (hint != null && hint.width() > 0 && hint.height() > 0) {
+            builder.setSourceRectHint(hint)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(autoEnter)
+            builder.setSeamlessResizeEnabled(true)
+        }
+        return builder.build()
     }
 
     private fun tryEnterPictureInPictureOnLeave() {
@@ -598,9 +645,18 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         return null
     }
 
-    private fun enablePictureInPicture(player: BetterPlayer) {
+    private fun enablePictureInPicture(
+        player: BetterPlayer,
+        leftDp: Double = 0.0,
+        topDp: Double = 0.0,
+        widthDp: Double = 0.0,
+        heightDp: Double = 0.0
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val act = activity ?: return
+            rememberSourceRect(leftDp, topDp, widthDp, heightDp)
+            pipRefreshHandler.removeCallbacksAndMessages(null)
+            pipRefreshScheduled = false
             if (act.isInPictureInPictureMode) {
                 startPictureInPictureListenerTimer(player)
                 player.onPictureInPictureStatusChanged(true)
@@ -609,14 +665,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             }
             prepareActivityForPip(act)
             player.setupMediaSession(flutterState!!.applicationContext)
-            val builder = PictureInPictureParams.Builder()
-                .setAspectRatio(Rational(16, 9))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // Keep auto-enter armed while mini wants background PiP.
-                builder.setAutoEnterEnabled(pipEnterOnLeave)
-                builder.setSeamlessResizeEnabled(true)
-            }
-            val params = builder.build()
+            val params = buildPipParams()
             try {
                 act.setPictureInPictureParams(params)
             } catch (_: Exception) {
@@ -674,6 +723,9 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         // SCREEN_ORIENTATION_PORTRAIT left the activity portrait while the
         // player still used landscape/fullscreen layout.
         act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        pipRefreshHandler.removeCallbacksAndMessages(null)
+        pipRefreshScheduled = false
+        lastPipSourceRect = null
     }
 
     private fun startPictureInPictureListenerTimer(player: BetterPlayer) {
@@ -718,44 +770,15 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     }
 
     /**
-     * Some devices (esp. release + background enter) leave the first PiP frame
-     * blank until the user double-taps (size toggle). Nudge aspect ratio and
-     * rebind the video surface a few times while still in PiP.
+     * Previously rebinding / nudging aspect on enter caused visible flicker.
+     * Keep a no-op latch so callers stay safe; blank first frames are rare
+     * with sourceRectHint + seamless resize.
      */
     private fun schedulePipFirstFrameRefresh(player: BetterPlayer) {
-        val act = activity ?: return
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            player.refreshVideoSurfaceForPip()
-            return
-        }
-        val main = Handler(Looper.getMainLooper())
-        fun applyAspect(w: Int, h: Int) {
-            if (activity?.isInPictureInPictureMode != true) return
-            try {
-                val builder = PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(w, h))
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    builder.setAutoEnterEnabled(pipEnterOnLeave)
-                    builder.setSeamlessResizeEnabled(true)
-                }
-                act.setPictureInPictureParams(builder.build())
-            } catch (_: Exception) {
-            }
-            player.refreshVideoSurfaceForPip()
-        }
-        // Immediate rebind, then aspect nudges + restores (triggers the same
-        // redraw path as OEM double-tap resize). Extra passes help mini→PiP
-        // after Flutter expands the texture from the clipped mini shell.
-        player.refreshVideoSurfaceForPip()
-        main.postDelayed({ applyAspect(161, 90) }, 50)
-        main.postDelayed({ applyAspect(16, 9) }, 160)
-        main.postDelayed({ applyAspect(160, 91) }, 320)
-        main.postDelayed({ applyAspect(16, 9) }, 450)
-        main.postDelayed({
-            if (activity?.isInPictureInPictureMode == true) {
-                player.refreshVideoSurfaceForPip()
-            }
-        }, 700)
+        if (pipRefreshScheduled) return
+        pipRefreshScheduled = true
+        // Intentionally do not rebind or change aspect on enter — that was the
+        // remaining single flash after multi-nudge was removed.
     }
 
     private fun dispose(player: BetterPlayer, textureId: Long) {

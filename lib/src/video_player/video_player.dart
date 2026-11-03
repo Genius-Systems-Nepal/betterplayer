@@ -36,6 +36,9 @@ class VideoPlayerValue {
     this.isPip = false,
     this.nerdStatValue = "",
     this.bitrateValue = 0,
+    this.selectedVideoWidth = 0,
+    this.selectedVideoHeight = 0,
+    this.selectedTrackBitrate = 0,
     this.errorCode = "0",
   });
 
@@ -101,8 +104,17 @@ class VideoPlayerValue {
   /// Nerd stats
   final String nerdStatValue;
 
-  /// Bitrate
+  /// Bandwidth estimate (bits/sec) from the player.
   final int bitrateValue;
+
+  /// Currently selected video track width (Android ABR); 0 if unknown.
+  final int selectedVideoWidth;
+
+  /// Currently selected video track height (Android ABR); 0 if unknown.
+  final int selectedVideoHeight;
+
+  /// Currently selected track bitrate (Android ABR); 0 if unknown.
+  final int selectedTrackBitrate;
 
   /// ErrorCode
   final String errorCode;
@@ -142,6 +154,9 @@ class VideoPlayerValue {
     bool? isPip,
     String? nerdStatValue,
     int? bitrateValue,
+    int? selectedVideoWidth,
+    int? selectedVideoHeight,
+    int? selectedTrackBitrate,
     Object? errorCode = _unset,
   }) {
     return VideoPlayerValue(
@@ -159,6 +174,9 @@ class VideoPlayerValue {
       isPip: isPip ?? this.isPip,
       nerdStatValue: nerdStatValue ?? this.nerdStatValue,
       bitrateValue: bitrateValue ?? this.bitrateValue,
+      selectedVideoWidth: selectedVideoWidth ?? this.selectedVideoWidth,
+      selectedVideoHeight: selectedVideoHeight ?? this.selectedVideoHeight,
+      selectedTrackBitrate: selectedTrackBitrate ?? this.selectedTrackBitrate,
       errorCode: identical(errorCode, _unset) ? this.errorCode : (errorCode as String? ?? '0'),
     );
   }
@@ -299,7 +317,29 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           value = value.copyWith(nerdStatValue: event.nerdStat);
           break;
         case VideoEventType.bitrateUpdate:
-          value = value.copyWith(bitrateValue: event.bitrateUpdate);
+          final dynamic raw = event.bitrateUpdate;
+          int estimate = 0;
+          int selectedW = value.selectedVideoWidth;
+          int selectedH = value.selectedVideoHeight;
+          int selectedBr = value.selectedTrackBitrate;
+          if (raw is Map) {
+            final Object? br = raw['bitrate'];
+            if (br is num) estimate = br.round();
+            final Object? w = raw['width'];
+            if (w is num && w > 0) selectedW = w.round();
+            final Object? h = raw['height'];
+            if (h is num && h > 0) selectedH = h.round();
+            final Object? sbr = raw['selectedBitrate'];
+            if (sbr is num && sbr > 0) selectedBr = sbr.round();
+          } else if (raw is num) {
+            estimate = raw.round();
+          }
+          value = value.copyWith(
+            bitrateValue: estimate,
+            selectedVideoWidth: selectedW,
+            selectedVideoHeight: selectedH,
+            selectedTrackBitrate: selectedBr,
+          );
           break;
         case VideoEventType.unknown:
           break;
@@ -684,6 +724,12 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   /// Android mini → background: arm native onUserLeaveHint / auto-enter PiP.
   Future<void> setPipEnterOnLeave(bool enabled) async {
     await _videoPlayerPlatform.setPipEnterOnLeave(textureId, enabled);
+  }
+
+  /// Clear Activity auto-enter even when no [VideoPlayerController] remains.
+  /// Native [setPipEnterOnLeave] is plugin-scoped; a missing texture still clears it.
+  static Future<void> clearPipEnterOnLeaveGlobal() async {
+    await _videoPlayerPlatform.setPipEnterOnLeave(-1, false);
   }
 
   Future<void> disablePictureInPicture() async {

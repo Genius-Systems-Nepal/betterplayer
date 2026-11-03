@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:better_player/better_player.dart';
 import 'package:better_player/src/configuration/better_player_controller_event.dart';
 import 'package:better_player/src/core/better_player_utils.dart';
@@ -721,7 +722,10 @@ class BetterPlayerController {
 
   ///Send player event to all listeners.
   void _postEvent(BetterPlayerEvent betterPlayerEvent) {
-    for (final Function(BetterPlayerEvent)? eventListener in _eventListeners) {
+    // Copy — listeners often remove themselves during finished/dispose and
+    // would otherwise throw Concurrent modification during iteration.
+    final List<Function(BetterPlayerEvent)?> listeners = List<Function(BetterPlayerEvent)?>.of(_eventListeners);
+    for (final Function(BetterPlayerEvent)? eventListener in listeners) {
       if (eventListener != null) {
         eventListener(betterPlayerEvent);
       }
@@ -1038,12 +1042,38 @@ class BetterPlayerController {
       setControlsEnabled(false);
       if (Platform.isAndroid) {
         _wasInFullScreenBeforePiP = _isFullScreen;
-        await videoPlayerController?.enablePictureInPicture(left: 0, top: 0, width: 0, height: 0);
+        // Pass real player bounds for sourceRectHint (smooth Activity PiP enter).
+        // Zero rect was ignored natively and left the system without a hint.
+        double left = 0;
+        double top = 0;
+        double width = 0;
+        double height = 0;
+        final BuildContext? pipContext = betterPlayerGlobalKey.currentContext;
+        if (pipContext != null && pipContext.mounted) {
+          final RenderObject? renderObject = pipContext.findRenderObject();
+          if (renderObject is RenderBox &&
+              renderObject.hasSize &&
+              renderObject.size.width > 0 &&
+              renderObject.size.height > 0) {
+            final Offset position = renderObject.localToGlobal(Offset.zero);
+            left = position.dx;
+            top = position.dy;
+            width = renderObject.size.width;
+            height = renderObject.size.height;
+          }
+        }
+        await videoPlayerController?.enablePictureInPicture(
+          left: left,
+          top: top,
+          width: width,
+          height: height,
+        );
         // Do not enterFullScreen() here — that pushes a Flutter fullscreen
         // route via openFullscreen. With custom app fullscreen (NPL/details
         // landscape), the BetterPlayer element is often disposed during the
         // PiP/orientation rebuild and Navigator.of(context) null-checks.
-        _postEvent(BetterPlayerEvent(BetterPlayerEventType.pipStart));
+        // Do not post pipStart here — native Activity callback emits pipStart;
+        // an early Dart event raced layout and contributed to enter flicker.
         return;
       }
       if (Platform.isIOS) {
@@ -1118,6 +1148,26 @@ class BetterPlayerController {
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.seekTo));
         break;
       case VideoEventType.completed:
+        // Android Activity PiP shows the whole Flutter UI. Close the PiP
+        // window BEFORE notifying listeners — otherwise finished handlers
+        // rebuild details/home chrome into the still-open PiP window.
+        if (Platform.isAndroid) {
+          try {
+            bool inPip = videoPlayerController?.value.isPip ?? false;
+            if (!inPip) {
+              inPip = await videoPlayerController?.isActivityInPictureInPictureMode() ?? false;
+            }
+            if (inPip) {
+              try {
+                await videoPlayerController?.setPipEnterOnLeave(false);
+              } catch (_) {}
+              try {
+                await videoPlayerController?.pause();
+              } catch (_) {}
+              await videoPlayerController?.disablePictureInPicture();
+            }
+          } catch (_) {}
+        }
         final VideoPlayerValue? videoValue = videoPlayerController?.value;
         _postEvent(
           BetterPlayerEvent(
@@ -1146,9 +1196,26 @@ class BetterPlayerController {
         }));
         break;
       case VideoEventType.bitrateUpdate:
-        _postEvent(BetterPlayerEvent(BetterPlayerEventType.bitrateUpdate, parameters: <String, dynamic>{
+        final Map<String, dynamic> bitrateParams = <String, dynamic>{
           "bitrateUpdate": event.bitrateUpdate,
-        }));
+        };
+        final dynamic raw = event.bitrateUpdate;
+        if (raw is Map) {
+          final Object? br = raw['bitrate'];
+          if (br is num) bitrateParams['bitrate'] = br.round();
+          final Object? w = raw['width'];
+          if (w is num) bitrateParams['width'] = w.round();
+          final Object? h = raw['height'];
+          if (h is num) bitrateParams['height'] = h.round();
+          final Object? sbr = raw['selectedBitrate'];
+          if (sbr is num) bitrateParams['selectedBitrate'] = sbr.round();
+        } else if (raw is num) {
+          bitrateParams['bitrate'] = raw.round();
+        }
+        _postEvent(BetterPlayerEvent(
+          BetterPlayerEventType.bitrateUpdate,
+          parameters: bitrateParams,
+        ));
         break;
       case VideoEventType.adStarted:
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.adStarted));

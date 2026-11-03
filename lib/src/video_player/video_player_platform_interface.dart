@@ -434,7 +434,7 @@ class VideoEvent {
     this.buffered,
     this.position,
     this.nerdStat,
-    this.bitrateUpdate = 0
+    this.bitrateUpdate,
   });
 
   /// The type of the event.
@@ -466,8 +466,9 @@ class VideoEvent {
   ///Nerdstat
   final dynamic nerdStat;
 
-  ///bitrate
-  final int bitrateUpdate;
+  /// Bandwidth estimate — [int]/[num], or Android Map with
+  /// bitrate / width / height / selectedBitrate.
+  final dynamic bitrateUpdate;
 
   @override
   bool operator ==(Object other) {
