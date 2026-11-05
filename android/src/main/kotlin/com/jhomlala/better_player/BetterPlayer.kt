@@ -58,6 +58,7 @@ import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
 import com.google.android.exoplayer2.util.Util
+import com.jhomlala.better_player.DataSourceUtils.attachBandwidthMeter
 import com.jhomlala.better_player.DataSourceUtils.getDataSourceFactory
 import com.jhomlala.better_player.DataSourceUtils.getUserAgent
 import com.jhomlala.better_player.DataSourceUtils.isHTTP
@@ -106,12 +107,18 @@ internal class BetterPlayer(
             .setInitialBitrateEstimate(ABR_INITIAL_BITRATE_ESTIMATE)
             .build()
 
-    // Faster downshift than Exo defaults (25s / 10s) so poor networks leave HD;
-    // still patient on upshift so we don't thrash.
+    /// Meter installed on the player. Quanteec replaces [bandwidthMeter].
+    /// Media sources must report bytes to this instance or Auto never leaves
+    /// the startup estimate.
+    private var mediaBandwidthMeter: com.google.android.exoplayer2.upstream.BandwidthMeter =
+        bandwidthMeter
+
+    // Downshift after ~2s of buffer. Upshift after ~3s so live (short buffer)
+    // can climb; 10s never arrived on a live edge.
     private val trackSelector: DefaultTrackSelector = DefaultTrackSelector(
         context,
         AdaptiveTrackSelection.Factory(
-            /* minDurationForQualityIncreaseMs */ 10_000,
+            /* minDurationForQualityIncreaseMs */ 3_000,
             /* maxDurationForQualityDecreaseMs */ 2_000,
             /* minDurationToRetainAfterDiscardMs */ 2_000,
             /* bandwidthFraction */ 0.65f
@@ -120,10 +127,11 @@ internal class BetterPlayer(
     private val loadControl: LoadControl
     private var isInitialized = false
 
-    /** True after the viewer picks a specific rendition. Auto playback may cap on stall. */
+    /** True after the viewer picks a specific rendition. Auto leaves max bitrate open. */
     private var manualBitrateLock = false
-    private var abrCappedForBuffer = false
-    private var lastAbrTightenElapsedMs = 0L
+
+    /** Last estimate published by the meter actually installed on the player. */
+    private var lastBandwidthEstimate: Long = ABR_INITIAL_BITRATE_ESTIMATE
     private var lastLoggedVideoBitrate: Int = -1
     private var surface: Surface? = null
     private var key: String? = null
@@ -235,6 +243,7 @@ internal class BetterPlayer(
 
             val quanteecDataSourceFactory = QuanteecBaseDataSource.Factory(quanteecCore!!)
             val quanteecBandwidthMeters = QuanteecBandwidthMeters.Builder(context).build()
+            mediaBandwidthMeter = quanteecBandwidthMeters
 
             val mediaSourceFactory: MediaSourceFactory =
                 DefaultMediaSourceFactory(quanteecDataSourceFactory)
@@ -369,7 +378,7 @@ internal class BetterPlayer(
         if (uri.toString().contains("rtmp")) {
             dataSourceFactory = buildRtmp()
         } else if (isHTTP(uri)) {
-            dataSourceFactory = getDataSourceFactory(userAgent, headers)
+            dataSourceFactory = getDataSourceFactory(userAgent, headers, mediaBandwidthMeter)
             dataSourceFactory = maybeWrapCmcd(dataSourceFactory)
             if (useCache == true && maxCacheSize > 0 && maxCacheFileSize > 0) {
                 dataSourceFactory = CacheDataSourceFactory(
@@ -380,7 +389,10 @@ internal class BetterPlayer(
                 )
             }
         } else {
-            dataSourceFactory = DefaultDataSource.Factory(context)
+            dataSourceFactory = attachBandwidthMeter(
+                DefaultDataSource.Factory(context),
+                mediaBandwidthMeter
+            )
         }
 
         val contentType = Util.inferContentType(uri, null)
@@ -462,7 +474,9 @@ internal class BetterPlayer(
         val context = drmAppContext ?: return
 
         if (drmIsDash) {
-            val mediaFactory = maybeWrapCmcd(DefaultHttpDataSource.Factory())
+            val mediaFactory = maybeWrapCmcd(
+                attachBandwidthMeter(DefaultHttpDataSource.Factory(), mediaBandwidthMeter)
+            )
             val drmMediaSource = DrmHelper().buildDrmMediaSource(
                 uri,
                 context,
@@ -476,7 +490,9 @@ internal class BetterPlayer(
             exoPlayer?.setMediaSource(drmMediaSource)
         } else {
             drmSessionManager = buildWidevineDrmSessionManager(licenseUrl)
-            val factory = drmDataSourceFactory ?: maybeWrapCmcd(DefaultDataSource.Factory(context))
+            val factory = drmDataSourceFactory ?: maybeWrapCmcd(
+                attachBandwidthMeter(DefaultDataSource.Factory(context), mediaBandwidthMeter)
+            )
             buildMediaSource(uri, drmAdsUri, factory, drmFormatHint, drmCacheKey, context)
         }
         if (fromSilentRelicense) {
@@ -969,12 +985,12 @@ internal class BetterPlayer(
                 totalBytesLoaded: Long,
                 bitrateEstimate: Long
             ) {
+                lastBandwidthEstimate = bitrateEstimate
                 sendBitrate(bitrateEstimate)
-                maybeTightenAbrFromEstimate(bitrateEstimate)
                 logAbr(
                     "bandwidth estimate=${bitrateEstimate}Bps " +
                             "loadMs=$totalLoadTimeMs bytes=$totalBytesLoaded " +
-                            "capped=$abrCappedForBuffer manual=$manualBitrateLock"
+                            "manual=$manualBitrateLock"
                 )
             }
         })
@@ -990,10 +1006,7 @@ internal class BetterPlayer(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
                     Player.STATE_BUFFERING -> {
-                        // Only rebuffer (not first start) — hard-cap so we leave HD
-                        // on 2G. First start relies on low initial bandwidth estimate.
                         if (isInitialized) {
-                            capAbrForSlowBuffer()
                             cmcdSessionRef.get()?.setRebuffering(true)
                         }
                         sendBufferingUpdate(true)
@@ -1003,10 +1016,6 @@ internal class BetterPlayer(
                     }
 
                     Player.STATE_READY -> {
-                        // Release rebuffer/tighten cap only when bandwidth has
-                        // recovered — otherwise Auto stays pinned on a low rung
-                        // or, if we always released, jumps back to HD too soon.
-                        releaseAbrCapAfterBuffer()
                         logSelectedVideoTrack("ready")
                         // Successful playback — allow future MediaCodec recoveries.
                         decoderFailureRecoverCount = 0
@@ -1133,9 +1142,6 @@ internal class BetterPlayer(
         val parametersBuilder = trackSelector.buildUponParameters()
         val auto = width == 0 && height == 0 && bitrate == 0
         manualBitrateLock = !auto
-        if (!auto) {
-            abrCappedForBuffer = false
-        }
         if (width != 0 && height != 0) {
             parametersBuilder.setMaxVideoSize(width, height)
         }
@@ -1144,18 +1150,12 @@ internal class BetterPlayer(
         }
         if (auto) {
             parametersBuilder.clearVideoSizeConstraints()
-            // Dart setup / quality sheet often calls setTrack(auto) after a
-            // rebuffer cap is already in place. Clearing maxBitrate here used
-            // to wipe that cap and jump straight back to 1080p.
-            if (!abrCappedForBuffer) {
-                parametersBuilder.setMaxVideoBitrate(Int.MAX_VALUE)
-            }
+            parametersBuilder.setMaxVideoBitrate(Int.MAX_VALUE)
         }
         trackSelector.setParameters(parametersBuilder)
         logAbr(
             "setTrack auto=$auto ${width}x${height} bitrate=$bitrate " +
-                    "estimate=${bandwidthMeter.bitrateEstimate} " +
-                    "capped=$abrCappedForBuffer " +
+                    "estimate=$lastBandwidthEstimate " +
                     "maxBr=${trackSelector.parameters.maxVideoBitrate}"
         )
     }
@@ -1177,93 +1177,9 @@ internal class BetterPlayer(
         val h = format?.height ?: -1
         logAbr(
             "$reason selected=${w}x${h} bitrate=$br " +
-                    "estimate=${bandwidthMeter.bitrateEstimate} " +
-                    "capped=$abrCappedForBuffer manual=$manualBitrateLock"
+                    "estimate=$lastBandwidthEstimate " +
+                    "manual=$manualBitrateLock"
         )
-    }
-
-    /**
-     * Rebuffering means the current rung is too high for the link.
-     * Cap max bitrate so the next chunk is a lower ladder step (2G must not
-     * keep pulling 1080p). Manual quality lock is left alone.
-     */
-    private fun capAbrForSlowBuffer() {
-        if (manualBitrateLock) return
-        val estimate = bandwidthMeter.bitrateEstimate
-        val currentBr = exoPlayer?.videoFormat?.bitrate?.takeIf {
-            it != Format.NO_VALUE
-        } ?: 0
-        val fromEstimate = if (estimate > 0L) {
-            (estimate * 0.65).toLong()
-        } else {
-            ABR_INITIAL_BITRATE_ESTIMATE
-        }
-        // While stalled, never allow above ~480p-class even if the meter is
-        // still inflated from Wi‑Fi / early HD segments.
-        val cap = minOf(
-            maxOf(fromEstimate, ABR_FLOOR_BITRATE),
-            ABR_REBUFFER_MAX_BITRATE
-        ).toInt()
-        val parametersBuilder = trackSelector.buildUponParameters()
-        parametersBuilder.setMaxVideoBitrate(cap)
-        trackSelector.setParameters(parametersBuilder)
-        abrCappedForBuffer = true
-        logAbr(
-            "capAbr rebuffer estimate=$estimate currentBr=$currentBr cap=$cap"
-        )
-    }
-
-    /**
-     * When measured bandwidth falls well below the selected track bitrate,
-     * tighten maxVideoBitrate so AdaptiveTrackSelection must downshift —
-     * without waiting for another rebuffer. Debounced to avoid thrash.
-     */
-    private fun maybeTightenAbrFromEstimate(estimate: Long) {
-        if (manualBitrateLock || estimate <= 0L) return
-        val currentBr = exoPlayer?.videoFormat?.bitrate?.takeIf {
-            it != Format.NO_VALUE
-        } ?: return
-        val affordable = (estimate * ABR_TIGHTEN_FRACTION).toLong()
-        if (currentBr <= affordable) {
-            if (abrCappedForBuffer && estimate >= ABR_RELEASE_MIN_ESTIMATE) {
-                releaseAbrCapAfterBuffer()
-            }
-            return
-        }
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastAbrTightenElapsedMs < ABR_TIGHTEN_MIN_INTERVAL_MS) return
-        lastAbrTightenElapsedMs = now
-        var cap = maxOf(affordable, ABR_FLOOR_BITRATE).toInt()
-        if (abrCappedForBuffer) {
-            cap = minOf(cap, ABR_REBUFFER_MAX_BITRATE.toInt())
-        }
-        val currentMax = trackSelector.parameters.maxVideoBitrate
-        if (currentMax != Int.MAX_VALUE && currentMax <= cap) return
-        trackSelector.setParameters(
-            trackSelector.buildUponParameters().setMaxVideoBitrate(cap)
-        )
-        abrCappedForBuffer = true
-        logAbr("tightenAbr estimate=$estimate currentBr=$currentBr cap=$cap")
-    }
-
-    /**
-     * Clear rebuffer/tighten maxBitrate only once bandwidth has recovered
-     * enough for AdaptiveTrackSelection to upshift safely.
-     */
-    private fun releaseAbrCapAfterBuffer() {
-        if (!abrCappedForBuffer || manualBitrateLock) return
-        val estimate = bandwidthMeter.bitrateEstimate
-        if (estimate < ABR_RELEASE_MIN_ESTIMATE) {
-            logAbr(
-                "keepCap estimate=$estimate need>=$ABR_RELEASE_MIN_ESTIMATE"
-            )
-            return
-        }
-        val parametersBuilder = trackSelector.buildUponParameters()
-        parametersBuilder.setMaxVideoBitrate(Int.MAX_VALUE)
-        trackSelector.setParameters(parametersBuilder)
-        abrCappedForBuffer = false
-        logAbr("releaseCap estimate=$estimate (ABR free to up/down)")
     }
 
     fun seekTo(location: Int) {
@@ -1598,7 +1514,7 @@ internal class BetterPlayer(
         } catch (_: Exception) {
         }
         val throughput = try {
-            val estimate = bandwidthMeter.bitrateEstimate
+            val estimate = lastBandwidthEstimate
             if (estimate > 0) (estimate / 1000).toInt() else null
         } catch (_: Exception) {
             null
@@ -1664,20 +1580,6 @@ internal class BetterPlayer(
 
         /** ~300 kbps — prefer lowest viable ladder rung at startup. */
         private const val ABR_INITIAL_BITRATE_ESTIMATE = 300_000L
-
-        /** Floor when capping during rebuffer (still playable on 2G). */
-        private const val ABR_FLOOR_BITRATE = 150_000L
-
-        /** While rebuffering, never allow above ~480p-class rungs. */
-        private const val ABR_REBUFFER_MAX_BITRATE = 800_000L
-
-        /** Only clear maxBitrate once estimate supports ~720p headroom. */
-        private const val ABR_RELEASE_MIN_ESTIMATE = 2_500_000L
-
-        /** Fraction of estimate used when deciding if current track is affordable. */
-        private const val ABR_TIGHTEN_FRACTION = 0.7
-
-        private const val ABR_TIGHTEN_MIN_INTERVAL_MS = 1_500L
 
         /** Debounce OEM KEY_EXPIRED storms while a recreate is in flight. */
         private const val SILENT_DRM_RELICENSE_DEBOUNCE_MS = 1500L

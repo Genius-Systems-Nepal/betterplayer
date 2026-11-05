@@ -71,7 +71,10 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     NSTimer *nerdStatTimer;
     BetterPlayerVuDrmAssetsLoaderDelegate *_vuDrmAssetsloaderDelegate;
     BOOL nerdStatActive;
-    double lastBitRate;
+    double _lastObservedBitRate;
+    double _lastIndicatedBitRate;
+    int _lastReportedWidth;
+    int _lastReportedHeight;
     /// YES while PiP should keep playing across app background (same as in-app).
     BOOL _pipDesiredPlaying;
     /// Mini-only: allow automatic AV PiP when leaving the app (mirrors Android).
@@ -83,8 +86,10 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     BOOL _pipExpandingToApp;
     /// Resume in-app playback after PiP stop when expanding while playing.
     BOOL _pipResumeAfterStop;
-    /// YES after Auto (0x0x0) until buffer is healthy and peak cap is cleared.
+    /// YES after Auto until the first measured throughput sample clears the startup peak.
     BOOL _autoAbrPendingUnlock;
+    /// Bumped to cancel a scheduled startup-cap fallback.
+    NSInteger _autoAbrUnlockGeneration;
     NSInteger _liveEdgeRecoverCount;
     NSTimeInterval _lastLiveEdgeRecoverAt;
     /// Set once we observe indefinite duration (live HLS/DASH).
@@ -137,6 +142,9 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     _liveEdgeRecoverCount = 0;
     _lastLiveEdgeRecoverAt = 0;
     _isLiveStream = NO;
+    _lastObservedBitRate = -1;
+    _lastIndicatedBitRate = -1;
+    _autoAbrUnlockGeneration = 0;
     return self;
 }
 
@@ -206,6 +214,41 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     }
 }
 #endif
+
+/// HLS (and live, once known) should wait so AVPlayer can step down before a stall.
+/// A single progressive file keeps waits off so a large download still starts quickly.
+- (BOOL)isHlsSource:(NSURL *)url videoExtension:(NSString *)videoExtension {
+    NSString *ext = nil;
+    if (videoExtension != nil && videoExtension != (id) [NSNull null]) {
+        ext = videoExtension;
+    }
+    if (ext.length == 0 && url != nil) {
+        ext = url.pathExtension;
+    }
+    NSString *lowerExt = ext.lowercaseString;
+    if ([lowerExt isEqualToString:@"m3u8"] || [lowerExt isEqualToString:@"m3u"]) {
+        return YES;
+    }
+    NSString *absolute = url.absoluteString.lowercaseString;
+    return [absolute containsString:@".m3u8"];
+}
+
+- (void)configureStallMinimizationForURL:(NSURL *)url videoExtension:(NSString *)videoExtension {
+    if (@available
+    (iOS
+    10.0, *)) {
+        _player.automaticallyWaitsToMinimizeStalling =
+                [self isHlsSource:url videoExtension:videoExtension];
+    }
+}
+
+- (void)enableStallMinimizationForLive {
+    if (@available
+    (iOS
+    10.0, *)) {
+        _player.automaticallyWaitsToMinimizeStalling = YES;
+    }
+}
 
 /// Live when duration is indefinite, or we previously observed a live item this session.
 - (BOOL)isLikelyLiveItem:(AVPlayerItem *)item {
@@ -384,39 +427,88 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     }
 }
 
-- (void)handleAVPlayerAccess:(NSNotification *)notif {
-    AVPlayerItemAccessLog *accessLog = [((AVPlayerItem *)notif.object) accessLog];
-    AVPlayerItemAccessLogEvent *lastEvent = accessLog.events.lastObject;
-    float lastEventNumber = lastEvent.indicatedBitrate;
-    if (lastEventNumber != lastBitRate) {
-        lastBitRate = lastEventNumber;
-        if (_eventSink != nil) {
-            _eventSink(@{@"event" : @"bitrateUpdate", @"values" : [NSNumber numberWithInt:(int)lastBitRate]});
-        }
+- (int)positiveBitrate:(double)bitrate {
+    if (isnan(bitrate) || bitrate <= 0) {
+        return 0;
     }
+    return (int) bitrate;
 }
 
-- (void)capAutoAbrWhileWaiting {
-    if (_player.currentItem == nil) {
-        return;
-    }
-    double peak = _player.currentItem.preferredPeakBitRate;
-    // A specific rendition is locked; do not override a manual quality choice.
-    if (peak > 0 && peak != kAbrStartupPeakBitRate) {
-        return;
-    }
-    _autoAbrPendingUnlock = YES;
-    _player.currentItem.preferredPeakBitRate = kAbrStartupPeakBitRate;
-}
-
-- (void)unlockAutoAbrIfNeeded {
+- (void)unlockAutoAbrOnce {
     if (!_autoAbrPendingUnlock) {
         return;
     }
     _autoAbrPendingUnlock = NO;
+    _autoAbrUnlockGeneration += 1;
     if (_player.currentItem != nil) {
         _player.currentItem.preferredPeakBitRate = 0;
     }
+}
+
+/// If a stream never reports observedBitrate, drop the startup cap so Auto is not stuck at 300 kbps.
+- (void)scheduleAutoAbrUnlockFallback {
+    NSInteger token = ++_autoAbrUnlockGeneration;
+    __weak BetterPlayer *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        BetterPlayer *player = weakSelf;
+        if (player == nil || token != player->_autoAbrUnlockGeneration) {
+            return;
+        }
+        if (player->_disposed || !player->_autoAbrPendingUnlock) {
+            return;
+        }
+        [player unlockAutoAbrOnce];
+    });
+}
+
+- (void)handleAVPlayerAccess:(NSNotification *)notif {
+    AVPlayerItem *item = (AVPlayerItem *) notif.object;
+    if (item == nil || item != _player.currentItem) {
+        return;
+    }
+    AVPlayerItemAccessLogEvent *lastEvent = item.accessLog.events.lastObject;
+    if (lastEvent == nil) {
+        return;
+    }
+    double observed = lastEvent.observedBitrate;
+    double indicated = lastEvent.indicatedBitrate;
+    // One unlock after the first real throughput sample. Later stalls must not recap.
+    if (_autoAbrPendingUnlock && observed > 0) {
+        [self unlockAutoAbrOnce];
+    }
+    int observedInt = [self positiveBitrate:observed];
+    int indicatedInt = [self positiveBitrate:indicated];
+    CGSize size = item.presentationSize;
+    int width = size.width > 0 ? (int) size.width : 0;
+    int height = size.height > 0 ? (int) size.height : 0;
+    if (observed == _lastObservedBitRate &&
+            indicated == _lastIndicatedBitRate &&
+            width == _lastReportedWidth &&
+            height == _lastReportedHeight) {
+        return;
+    }
+    _lastObservedBitRate = observed;
+    _lastIndicatedBitRate = indicated;
+    _lastReportedWidth = width;
+    _lastReportedHeight = height;
+    if (_eventSink == nil) {
+        return;
+    }
+    NSMutableDictionary *values = [NSMutableDictionary dictionary];
+    // Throughput estimate. Fall back to the selected variant only when the
+    // access log has not measured the link yet.
+    int estimate = observedInt > 0 ? observedInt : indicatedInt;
+    values[@"bitrate"] = @(estimate);
+    if (width > 0) {
+        values[@"width"] = @(width);
+    }
+    if (height > 0) {
+        values[@"height"] = @(height);
+    }
+    if (indicatedInt > 0) {
+        values[@"selectedBitrate"] = @(indicatedInt);
+    }
+    _eventSink(@{@"event": @"bitrateUpdate", @"values": values});
 }
 
 - (void)clear {
@@ -429,6 +521,11 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     _key = nil;
     _adTagUrlOrAdsResponse = @"";
     _autoAbrPendingUnlock = NO;
+    _autoAbrUnlockGeneration += 1;
+    _lastObservedBitRate = -1;
+    _lastIndicatedBitRate = -1;
+    _lastReportedWidth = 0;
+    _lastReportedHeight = 0;
     _liveEdgeRecoverCount = 0;
     _lastLiveEdgeRecoverAt = 0;
     _isLiveStream = NO;
@@ -584,7 +681,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         mediaURL = url;
         mediaHeaders = headers;
     }
-    
+
+    [self configureStallMinimizationForURL:mediaURL videoExtension:videoExtension];
+
     AVPlayerItem* item;
     if (useCache){
         if (cacheKey == [NSNull null]){
@@ -645,6 +744,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     _isLiveStream = NO;
     _isStalledCheckStarted = false;
     _playerRate = 1;
+    _lastObservedBitRate = -1;
+    _lastIndicatedBitRate = -1;
+    _lastReportedWidth = 0;
+    _lastReportedHeight = 0;
     [_player replaceCurrentItemWithPlayerItem:item];
 
     AVAsset* asset = [item asset];
@@ -852,16 +955,13 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         10.0, *)) {
             AVPlayerTimeControlStatus status = _player.timeControlStatus;
             if (status == AVPlayerTimeControlStatusPlaying) {
-                [self unlockAutoAbrIfNeeded];
                 [self sendBufferingEnd];
             } else if (status == AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate) {
-                [self capAutoAbrWhileWaiting];
                 [self sendBufferingStart];
             }
         }
     } else if (context == playbackLikelyToKeepUpContext) {
         if ([[_player currentItem] isPlaybackLikelyToKeepUp]) {
-            [self unlockAutoAbrIfNeeded];
             [self updatePlayingState];
             [self sendBufferingEnd];
         }
@@ -922,6 +1022,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         const BOOL isLive = CMTIME_IS_INDEFINITE([_player currentItem].duration);
         if (isLive) {
             _isLiveStream = YES;
+            [self enableStallMinimizationForLive];
         }
         // The player may be initialized but still needs to determine the duration.
         if (isLive == false && [self duration] == 0) {
@@ -1087,9 +1188,13 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)setTrackParameters:(int) width: (int) height: (int)bitrate {
     if (width == 0 && height == 0 && bitrate == 0) {
-        // Auto: start with a low peak so playback begins on a low rung, then unlock.
+        // Auto: one low startup peak, cleared on the first throughput sample.
+        // Do not recap on later stalls — AVPlayer adapts after the peak is 0.
         _autoAbrPendingUnlock = YES;
-        _player.currentItem.preferredPeakBitRate = kAbrStartupPeakBitRate;
+        if (_player.currentItem != nil) {
+            _player.currentItem.preferredPeakBitRate = kAbrStartupPeakBitRate;
+        }
+        [self scheduleAutoAbrUnlockFallback];
         if (@available
         (iOS
         11.0, *)) {
@@ -1098,6 +1203,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         return;
     }
     _autoAbrPendingUnlock = NO;
+    _autoAbrUnlockGeneration += 1;
     _player.currentItem.preferredPeakBitRate = bitrate;
     if (@available(iOS 11.0, *)) {
         if (width == 0 && height == 0){
