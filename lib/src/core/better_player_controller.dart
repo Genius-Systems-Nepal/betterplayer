@@ -615,6 +615,24 @@ class BetterPlayerController {
     _postEvent(BetterPlayerEvent(BetterPlayerEventType.pause));
   }
 
+  /// iOS Cast: force-pause and clear Now Playing (skips PiP-on-leave pause guard).
+  Future<void> pauseAndHideMediaSession() async {
+    if (videoPlayerController == null) {
+      return;
+    }
+    try {
+      await videoPlayerController!.setPipEnterOnLeave(false);
+    } catch (_) {}
+    try {
+      await videoPlayerController!.pauseAndHideMediaSession();
+    } catch (_) {
+      try {
+        await videoPlayerController!.pause();
+      } catch (_) {}
+    }
+    _postEvent(BetterPlayerEvent(BetterPlayerEventType.pause));
+  }
+
   ///Move player to specific position/moment of the video.
   Future<void> seekTo(Duration moment) async {
     if (videoPlayerController == null) {

@@ -457,6 +457,12 @@ bool _remoteCommandsInitialized = false;
             BOOL enabled = [argsMap[@"enabled"] boolValue];
             [player setPipEnterOnLeave:enabled];
             result(nil);
+        } else if ([@"pauseAndHideMediaSession" isEqualToString:call.method]) {
+            // Cast / suppress local BG audio: force pause even when PiP-on-leave
+            // would otherwise skip pause (Dynamic Island audio-only).
+            [player setPipEnterOnLeave:false];
+            [player pauseAndHideMediaSession];
+            result(nil);
         } else if ([@"isPictureInPictureSupported" isEqualToString:call.method]){
             if (@available(iOS 9.0, *)){
                 if ([AVPictureInPictureController isPictureInPictureSupported]){

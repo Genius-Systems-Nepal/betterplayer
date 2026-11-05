@@ -331,6 +331,16 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
+  Future<void> pauseAndHideMediaSession(int? textureId) {
+    return _channel.invokeMethod<void>(
+      'pauseAndHideMediaSession',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
   Future<bool?> isPictureInPictureEnabled(int? textureId) {
     return _channel.invokeMethod<bool>(
       'isPictureInPictureSupported',

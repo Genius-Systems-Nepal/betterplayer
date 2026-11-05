@@ -732,6 +732,11 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     await _videoPlayerPlatform.setPipEnterOnLeave(-1, false);
   }
 
+  /// iOS: force-pause AVPlayer and clear Now Playing (Cast / no local BG audio).
+  Future<void> pauseAndHideMediaSession() async {
+    await _videoPlayerPlatform.pauseAndHideMediaSession(textureId);
+  }
+
   Future<void> disablePictureInPicture() async {
     await _videoPlayerPlatform.disablePictureInPicture(textureId);
   }

@@ -150,6 +150,11 @@ abstract class VideoPlayerPlatform {
     throw UnimplementedError('setPipEnterOnLeave() has not been implemented.');
   }
 
+  /// iOS: force pause + clear Now Playing (bypasses PiP-on-leave pause skip).
+  Future<void> pauseAndHideMediaSession(int? textureId) {
+    throw UnimplementedError('pauseAndHideMediaSession() has not been implemented.');
+  }
+
   ///Disables PiP mode.
   Future<void> disablePictureInPicture(int? textureId) {
     throw UnimplementedError(

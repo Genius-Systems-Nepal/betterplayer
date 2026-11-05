@@ -287,6 +287,12 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 setPipEnterOnLeave(enabled, player)
                 result.success(null)
             }
+            PAUSE_AND_HIDE_MEDIA_SESSION_METHOD -> {
+                // iOS Cast path; Android just pauses local playback.
+                setPipEnterOnLeave(false, player)
+                player.pause()
+                result.success(null)
+            }
             DISABLE_PICTURE_IN_PICTURE_METHOD -> {
                 disablePictureInPicture(player)
                 result.success(null)
@@ -901,6 +907,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val SET_AUDIO_TRACK_METHOD = "setAudioTrack"
         private const val ENABLE_PICTURE_IN_PICTURE_METHOD = "enablePictureInPicture"
         private const val SET_PIP_ENTER_ON_LEAVE_METHOD = "setPipEnterOnLeave"
+        private const val PAUSE_AND_HIDE_MEDIA_SESSION_METHOD = "pauseAndHideMediaSession"
         private const val DISABLE_PICTURE_IN_PICTURE_METHOD = "disablePictureInPicture"
         private const val IS_PICTURE_IN_PICTURE_SUPPORTED_METHOD = "isPictureInPictureSupported"
         private const val IS_ACTIVITY_IN_PICTURE_IN_PICTURE_MODE_METHOD =
