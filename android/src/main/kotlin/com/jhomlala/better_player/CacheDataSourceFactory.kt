@@ -5,7 +5,6 @@ import com.google.android.exoplayer2.upstream.DataSource
 import com.google.android.exoplayer2.upstream.cache.CacheDataSource
 import com.google.android.exoplayer2.upstream.FileDataSource
 import com.google.android.exoplayer2.upstream.cache.CacheDataSink
-import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 
 internal class CacheDataSourceFactory(
@@ -30,10 +29,10 @@ internal class CacheDataSourceFactory(
     }
 
     init {
-        val bandwidthMeter = DefaultBandwidthMeter.Builder(context).build()
+        // Upstream already reports bytes to the player's BandwidthMeter.
+        // A second meter here would hide that estimate from track selection.
         upstreamDataSource?.let {
             defaultDatasourceFactory = DefaultDataSource.Factory(context, upstreamDataSource)
-            defaultDatasourceFactory?.setTransferListener(bandwidthMeter)
         }
     }
 }

@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:better_player/src/configuration/better_player_buffering_configuration.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+
 import 'method_channel_video_player.dart';
 
 /// The interface that implementations of video_player must implement.
@@ -144,6 +145,16 @@ abstract class VideoPlayerPlatform {
         'enablePictureInPicture() has not been implemented.');
   }
 
+  /// Android: arm system PiP for the next user-leave (mini → background).
+  Future<void> setPipEnterOnLeave(int? textureId, bool enabled) {
+    throw UnimplementedError('setPipEnterOnLeave() has not been implemented.');
+  }
+
+  /// iOS: force pause + clear Now Playing (bypasses PiP-on-leave pause skip).
+  Future<void> pauseAndHideMediaSession(int? textureId) {
+    throw UnimplementedError('pauseAndHideMediaSession() has not been implemented.');
+  }
+
   ///Disables PiP mode.
   Future<void> disablePictureInPicture(int? textureId) {
     throw UnimplementedError(
@@ -153,6 +164,12 @@ abstract class VideoPlayerPlatform {
   Future<bool?> isPictureInPictureEnabled(int? textureId) {
     throw UnimplementedError(
         'isPictureInPictureEnabled() has not been implemented.');
+  }
+
+  /// Android: true only when the Activity is currently in system PiP.
+  Future<bool?> isActivityInPictureInPictureMode(int? textureId) {
+    throw UnimplementedError(
+        'isActivityInPictureInPictureMode() has not been implemented.');
   }
 
   Future<bool?> checkPipPermission(int? textureId) {
@@ -261,6 +278,7 @@ class DataSource {
     this.activityName,
     this.clearKey,
     this.videoExtension,
+    this.cmcdConfig,
   }) : assert(uri == null || asset == null);
 
   /// Describes the type of data source this [VideoPlayerController]
@@ -343,6 +361,9 @@ class DataSource {
 
   final String? videoExtension;
 
+  /// CTA-5004 CMCD (passed to native media HTTP stack).
+  final Map<String, dynamic>? cmcdConfig;
+
   /// Key to compare DataSource
   String? get key {
     String? result = "";
@@ -418,7 +439,7 @@ class VideoEvent {
     this.buffered,
     this.position,
     this.nerdStat,
-    this.bitrateUpdate = 0
+    this.bitrateUpdate,
   });
 
   /// The type of the event.
@@ -450,8 +471,9 @@ class VideoEvent {
   ///Nerdstat
   final dynamic nerdStat;
 
-  ///bitrate
-  final int bitrateUpdate;
+  /// Bandwidth estimate — [int]/[num], or Android Map with
+  /// bitrate / width / height / selectedBitrate.
+  final dynamic bitrateUpdate;
 
   @override
   bool operator ==(Object other) {

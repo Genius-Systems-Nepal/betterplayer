@@ -19,6 +19,20 @@ int texturesCount = -1;
 BetterPlayer* _notificationPlayer;
 bool _remoteCommandsInitialized = false;
 
+- (NSString *)normalizedDrmTokenFromValue:(id)rawToken {
+    if (![rawToken isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+    NSString *normalizedToken = [(NSString *)rawToken stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (normalizedToken.length == 0) {
+        return nil;
+    }
+    if ([normalizedToken caseInsensitiveCompare:@"null"] == NSOrderedSame) {
+        return nil;
+    }
+    return normalizedToken;
+}
+
 
 #pragma mark - FlutterPlugin protocol
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
@@ -177,6 +191,12 @@ bool _remoteCommandsInitialized = false;
 }
 
 - (void) setupRemoteCommandNotification:(BetterPlayer*)player, NSString* title, NSString* author , NSString* imageUrl{
+    // Do not keep publishing Now Playing while paused — that leaves Dynamic Island
+    // / lock-screen media after expanded background pause.
+    if (player == nil || !player.isPlaying) {
+        [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = @{};
+        return;
+    }
     float positionInSeconds = player.position /1000;
     float durationInSeconds = player.duration/ 1000;
 
@@ -291,7 +311,7 @@ bool _remoteCommandsInitialized = false;
     } else if ([@"create" isEqualToString:call.method]) {
 
         NSDictionary *argsMap = (NSDictionary *)call.arguments;
-        
+
         // In case of quanteec config dictionary is passed
         NSDictionary * _Nullable dictQuanteecConfig;
         if (argsMap[@"quanteecConfig"] != [NSNull null] && [argsMap[@"quanteecConfig"] isKindOfClass:[NSDictionary class]]) {
@@ -326,14 +346,13 @@ bool _remoteCommandsInitialized = false;
             NSString* videoExtension = dataSource[@"videoExtension"];
             NSString* adsUrl = dataSource[@"ads_url"];
             
-            NSString *drmToken;
-            if ([dataSource objectForKey:@"extraParams"] != [NSNull null]) {
-                NSDictionary *extraParams = dataSource[@"extraParams"];
-                if ([extraParams objectForKey:@"drm_token"] != [NSNull null]) {
-                    drmToken = extraParams[@"drm_token"];
-                }
+            NSString *drmToken = nil;
+            id extraParamsObject = dataSource[@"extraParams"];
+            if ([extraParamsObject isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *extraParams = (NSDictionary *)extraParamsObject;
+                drmToken = [self normalizedDrmTokenFromValue:extraParams[@"drm_token"]];
             }
-            
+
             int overriddenDuration = 0;
             if ([dataSource objectForKey:@"overriddenDuration"] != [NSNull null]){
                 overriddenDuration = [dataSource[@"overriddenDuration"] intValue];
@@ -352,6 +371,12 @@ bool _remoteCommandsInitialized = false;
                 headers = @{};
             }
 
+            NSDictionary * _Nullable
+            cmcdConfig = nil;
+            if (dataSource[@"cmcdConfig"] != [NSNull null] && [dataSource[@"cmcdConfig"] isKindOfClass:[NSDictionary class]]) {
+                cmcdConfig = dataSource[@"cmcdConfig"];
+            }
+
             if (assetArg) {
                 NSString* assetPath;
                 NSString* package = dataSource[@"package"];
@@ -362,7 +387,7 @@ bool _remoteCommandsInitialized = false;
                 }
                 [player setDataSourceAsset:assetPath withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration withDrmToken:drmToken];
             } else if (uriArg) {
-                [player setDataSourceURL:[NSURL URLWithString:uriArg] withKey:key withCertificateUrl:certificateUrl withLicenseUrl: licenseUrl withHeaders:headers withCache: useCache cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration videoExtension: videoExtension adsUrl: adsUrl withDrmToken:drmToken];
+                [player setDataSourceURL:[NSURL URLWithString:uriArg] withKey:key withCertificateUrl:certificateUrl withLicenseUrl:licenseUrl withHeaders:headers withCache:useCache cacheKey:cacheKey cacheManager:_cacheManager overriddenDuration:overriddenDuration videoExtension:videoExtension adsUrl:adsUrl withDrmToken:drmToken cmcdConfig:cmcdConfig];
             } else {
                 result(FlutterMethodNotImplemented);
             }
@@ -427,6 +452,17 @@ bool _remoteCommandsInitialized = false;
             double width = [argsMap[@"width"] doubleValue];
             double height = [argsMap[@"height"] doubleValue];
             [player enablePictureInPicture:CGRectMake(left, top, width, height)];
+            result(nil);
+        } else if ([@"setPipEnterOnLeave" isEqualToString:call.method]){
+            BOOL enabled = [argsMap[@"enabled"] boolValue];
+            [player setPipEnterOnLeave:enabled];
+            result(nil);
+        } else if ([@"pauseAndHideMediaSession" isEqualToString:call.method]) {
+            // Cast / suppress local BG audio: force pause even when PiP-on-leave
+            // would otherwise skip pause (Dynamic Island audio-only).
+            [player setPipEnterOnLeave:false];
+            [player pauseAndHideMediaSession];
+            result(nil);
         } else if ([@"isPictureInPictureSupported" isEqualToString:call.method]){
             if (@available(iOS 9.0, *)){
                 if ([AVPictureInPictureController isPictureInPictureSupported]){

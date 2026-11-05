@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:better_player/src/configuration/better_player_buffering_configuration.dart';
 import 'package:better_player/src/core/better_player_utils.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -32,6 +33,26 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   Future<void> nerdStat(int? textureId) async{
     return await _channel.invokeMethod<void>(
       'nerdStat',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
+  Future<void> playWhenReadyTrue(int? textureId) async{
+    return await _channel.invokeMethod<void>(
+      'playWhenReadyTrue',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
+  Future<void> playWhenReadyFalse(int? textureId) async{
+    return await _channel.invokeMethod<void>(
+      'playWhenReadyFalse',
       <String, dynamic>{
         'textureId': textureId,
       },
@@ -111,6 +132,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'activityName': dataSource.activityName,
           'clearKey': dataSource.clearKey,
           'videoExtension': dataSource.videoExtension,
+          'cmcdConfig': dataSource.cmcdConfig,
         };
         break;
       case DataSourceType.file:
@@ -298,9 +320,40 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
+  Future<void> setPipEnterOnLeave(int? textureId, bool enabled) {
+    return _channel.invokeMethod<void>(
+      'setPipEnterOnLeave',
+      <String, dynamic>{
+        'textureId': textureId,
+        'enabled': enabled,
+      },
+    );
+  }
+
+  @override
+  Future<void> pauseAndHideMediaSession(int? textureId) {
+    return _channel.invokeMethod<void>(
+      'pauseAndHideMediaSession',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
   Future<bool?> isPictureInPictureEnabled(int? textureId) {
     return _channel.invokeMethod<bool>(
       'isPictureInPictureSupported',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
+  Future<bool?> isActivityInPictureInPictureMode(int? textureId) {
+    return _channel.invokeMethod<bool>(
+      'isActivityInPictureInPictureMode',
       <String, dynamic>{
         'textureId': textureId,
       },
@@ -517,10 +570,20 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   @override
   Widget buildView(int? textureId) {
     if (defaultTargetPlatform == TargetPlatform.iOS) {
+      // Empty gestureRecognizers → UiKitView steals all touches; Flutter
+      // pull-down-to-mini / tap-to-show-controls never fire on the video.
       return UiKitView(
         viewType: 'com.jhomlala/better_player',
         creationParamsCodec: const StandardMessageCodec(),
         creationParams: {'textureId': textureId!},
+        // DoubleTap is not a OneSequenceGestureRecognizer — omit it.
+        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+          Factory<TapGestureRecognizer>(() => TapGestureRecognizer()),
+          Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer()),
+          Factory<VerticalDragGestureRecognizer>(
+            () => VerticalDragGestureRecognizer(),
+          ),
+        },
       );
     } else {
       return Texture(textureId: textureId!);

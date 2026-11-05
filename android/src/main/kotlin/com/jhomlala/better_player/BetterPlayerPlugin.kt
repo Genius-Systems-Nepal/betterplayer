@@ -8,28 +8,30 @@ import android.app.AppOpsManager
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.util.LongSparseArray
+import android.util.Rational
 import com.jhomlala.better_player.BetterPlayerCache.releaseCache
-import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.embedding.engine.plugins.activity.ActivityAware
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
 import io.flutter.embedding.engine.loader.FlutterLoader
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.EventChannel
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.view.TextureRegistry
-import java.lang.Exception
-import java.util.HashMap
 
 /**
  * Android platform implementation of the VideoPlayerPlugin.
@@ -41,8 +43,23 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     private var currentNotificationTextureId: Long = -1
     private var currentNotificationDataSource: Map<String, Any?>? = null
     private var activity: Activity? = null
+    private var activityBinding: ActivityPluginBinding? = null
     private var pipHandler: Handler? = null
     private var pipRunnable: Runnable? = null
+    private var pipEntered = false
+    private var pipEnterDeadline = 0L
+    /// When true (mini player), enter system PiP in [onUserLeaveHint] / auto-enter
+    /// so Flutter lifecycle delays do not leave audio-only notification playback.
+    private var pipEnterOnLeave = false
+    private var pipLeavePlayer: BetterPlayer? = null
+
+    /// Last Flutter player bounds (px) for [PictureInPictureParams.setSourceRectHint].
+    private var lastPipSourceRect: Rect? = null
+
+    /// At most one surface refresh per PiP enter (multi-refresh caused visible flicker).
+    private var pipRefreshScheduled = false
+    private val pipRefreshHandler = Handler(Looper.getMainLooper())
+
     override fun onAttachedToEngine(binding: FlutterPluginBinding) {
         val loader = FlutterLoader()
         flutterState = FlutterState(
@@ -79,13 +96,58 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityBinding = binding
+        instance = this
+        binding.addOnUserLeaveHintListener {
+            // Must enter here — waiting on Flutter `inactive`/`paused` is too late
+            // and only the media notification keeps playing until the app is reopened.
+            tryEnterPictureInPictureOnLeave()
+        }
     }
 
     override fun onDetachedFromActivityForConfigChanges() {}
 
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {}
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        activityBinding = binding
+        instance = this
+        binding.addOnUserLeaveHintListener {
+            tryEnterPictureInPictureOnLeave()
+        }
+    }
 
-    override fun onDetachedFromActivity() {}
+    override fun onDetachedFromActivity() {
+        if (instance === this) {
+            instance = null
+        }
+        activity = null
+        activityBinding = null
+        pipEnterOnLeave = false
+        pipLeavePlayer = null
+    }
+
+    /**
+     * Called from [np.com.nettv.MainActivity] when Activity PiP mode changes so
+     * Flutter gets [pipStart]/[pipStop] immediately (not only after the poll timer).
+     */
+    private fun handleActivityPictureInPictureModeChanged(inPip: Boolean) {
+        val player = pipLeavePlayer ?: findActivePlayer() ?: return
+        if (inPip) {
+            // Notify Dart immediately so player-only UI covers tabs before buffer/error.
+            player.onPictureInPictureStatusChanged(true)
+            schedulePipFirstFrameRefresh(player)
+            if (!pipEntered) {
+                startPictureInPictureListenerTimer(player)
+            }
+        } else {
+            if (activity?.isInPictureInPictureMode == true) return
+            player.onPictureInPictureStatusChanged(false)
+            player.disposeMediaSession()
+            restoreActivityAfterPip()
+            stopPipHandler()
+            pipEntered = false
+        }
+    }
 
     private fun disposeAllPlayers() {
         for (i in 0 until videoPlayers.size()) {
@@ -130,8 +192,18 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             STOP_PRE_CACHE_METHOD -> stopPreCache(call, result)
             CLEAR_CACHE_METHOD -> clearCache(result)
             else -> {
-                val textureId = (call.argument<Any>(TEXTURE_ID_PARAMETER) as Number?)!!.toLong()
+                val textureId = (call.argument<Any>(TEXTURE_ID_PARAMETER) as Number?)?.toLong() ?: 0L
                 val player = videoPlayers[textureId]
+                // Disarm auto-enter even when the Dart controller is already gone —
+                // otherwise Home still enters PiP from a stopped details page.
+                if (player == null &&
+                    call.method == SET_PIP_ENTER_ON_LEAVE_METHOD &&
+                    call.argument<Boolean>("enabled") != true
+                ) {
+                    setPipEnterOnLeave(false, null)
+                    result.success(null)
+                    return
+                }
                 if (player == null) {
                     result.error(
                         "Unknown textureId",
@@ -145,20 +217,12 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         }
     }
 
-    private fun isAdPlaying(player: BetterPlayer): Boolean {
-        return player.isAdPlaying()
-    }
-
     private fun contentDuration(player: BetterPlayer) : Long{
         return player.contentDuration()
     }
 
     private fun contentPosition(player: BetterPlayer) : Long {
         return player.contentPosition()
-    }
-
-    private fun disposeAdView(player: BetterPlayer) {
-        player.removeAdsView()
     }
 
     private fun onMethodCall(
@@ -211,7 +275,22 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 result.success(null)
             }
             ENABLE_PICTURE_IN_PICTURE_METHOD -> {
-                enablePictureInPicture(player)
+                val left = call.argument<Double>("left") ?: 0.0
+                val top = call.argument<Double>("top") ?: 0.0
+                val width = call.argument<Double>("width") ?: 0.0
+                val height = call.argument<Double>("height") ?: 0.0
+                enablePictureInPicture(player, left, top, width, height)
+                result.success(null)
+            }
+            SET_PIP_ENTER_ON_LEAVE_METHOD -> {
+                val enabled = call.argument<Boolean>("enabled") == true
+                setPipEnterOnLeave(enabled, player)
+                result.success(null)
+            }
+            PAUSE_AND_HIDE_MEDIA_SESSION_METHOD -> {
+                // iOS Cast path; Android just pauses local playback.
+                setPipEnterOnLeave(false, player)
+                player.pause()
                 result.success(null)
             }
             DISABLE_PICTURE_IN_PICTURE_METHOD -> {
@@ -221,6 +300,14 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             IS_PICTURE_IN_PICTURE_SUPPORTED_METHOD -> result.success(
                 isPictureInPictureSupported()
             )
+            IS_ACTIVITY_IN_PICTURE_IN_PICTURE_MODE_METHOD -> {
+                val inPip = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    activity?.isInPictureInPictureMode == true
+                } else {
+                    false
+                }
+                result.success(inPip)
+            }
             CHECK_PICTURE_IN_PICTURE_PERMISSION_METHOD -> result.success(
                 hasPipPermission(flutterState!!.applicationContext)
             )
@@ -299,7 +386,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 null,
                 result,
                 headers,
-                false,
+                null,
                 0L,
                 0L,
                 overriddenDuration.toLong(),
@@ -323,6 +410,9 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 getParameter(dataSource, DRM_HEADERS_PARAMETER, HashMap())
             val extraParams: Map<String, String> =
                 getParameter(dataSource, EXTRA_PARAMS_PARAMETER, HashMap())
+
+            @Suppress("UNCHECKED_CAST")
+            val cmcdConfig = dataSource["cmcdConfig"] as? Map<String, Any?>
             player.setDataSource(
                 flutterState!!.applicationContext,
                 key,
@@ -331,7 +421,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 formatHint,
                 result,
                 headers,
-                useCache,
+                null,
                 maxCacheSize,
                 maxCacheFileSize,
                 overriddenDuration.toLong(),
@@ -339,7 +429,8 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 drmHeaders,
                 extraParams,
                 cacheKey,
-                clearKey
+                clearKey,
+                cmcdConfig,
             )
         }
     }
@@ -451,6 +542,9 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         return defaultValue
     }
 
+    private fun isAdPlaying(player: BetterPlayer): Boolean {
+        return player.isAdPlaying()
+    }
 
     private fun isPictureInPictureSupported(): Boolean {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity != null && activity!!.packageManager
@@ -491,36 +585,206 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         }
     }
 
-    private fun enablePictureInPicture(player: BetterPlayer) {
+    private fun setPipEnterOnLeave(enabled: Boolean, player: BetterPlayer?) {
+        pipEnterOnLeave = enabled
+        pipLeavePlayer = if (enabled) player else null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val act = activity ?: return
+        try {
+            act.setPictureInPictureParams(buildPipParams(autoEnter = enabled))
+        } catch (_: Exception) {
+        }
+        if (enabled && player != null) {
+            try {
+                prepareActivityForPip(act)
+                player.setupMediaSession(flutterState!!.applicationContext)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun rememberSourceRect(
+        leftDp: Double,
+        topDp: Double,
+        widthDp: Double,
+        heightDp: Double
+    ) {
+        if (widthDp <= 0.0 || heightDp <= 0.0) return
+        val act = activity ?: return
+        val density = act.resources.displayMetrics.density
+        val l = (leftDp * density).toInt()
+        val t = (topDp * density).toInt()
+        val r = ((leftDp + widthDp) * density).toInt()
+        val b = ((topDp + heightDp) * density).toInt()
+        if (r <= l || b <= t) return
+        lastPipSourceRect = Rect(l, t, r, b)
+    }
+
+    private fun buildPipParams(autoEnter: Boolean = pipEnterOnLeave): PictureInPictureParams {
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+        val hint = lastPipSourceRect
+        if (hint != null && hint.width() > 0 && hint.height() > 0) {
+            builder.setSourceRectHint(hint)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(autoEnter)
+            builder.setSeamlessResizeEnabled(true)
+        }
+        return builder.build()
+    }
+
+    private fun tryEnterPictureInPictureOnLeave() {
+        if (!pipEnterOnLeave) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val act = activity ?: return
+        if (act.isInPictureInPictureMode) return
+        val player = pipLeavePlayer ?: findActivePlayer() ?: return
+        enablePictureInPicture(player)
+    }
+
+    private fun findActivePlayer(): BetterPlayer? {
+        for (i in 0 until videoPlayers.size()) {
+            val player = videoPlayers.valueAt(i)
+            if (player != null) return player
+        }
+        return null
+    }
+
+    private fun enablePictureInPicture(
+        player: BetterPlayer,
+        leftDp: Double = 0.0,
+        topDp: Double = 0.0,
+        widthDp: Double = 0.0,
+        heightDp: Double = 0.0
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val act = activity ?: return
+            rememberSourceRect(leftDp, topDp, widthDp, heightDp)
+            pipRefreshHandler.removeCallbacksAndMessages(null)
+            pipRefreshScheduled = false
+            if (act.isInPictureInPictureMode) {
+                startPictureInPictureListenerTimer(player)
+                player.onPictureInPictureStatusChanged(true)
+                schedulePipFirstFrameRefresh(player)
+                return
+            }
+            prepareActivityForPip(act)
             player.setupMediaSession(flutterState!!.applicationContext)
-            activity!!.enterPictureInPictureMode(PictureInPictureParams.Builder().build())
-            startPictureInPictureListenerTimer(player)
-            player.onPictureInPictureStatusChanged(true)
+            val params = buildPipParams()
+            try {
+                act.setPictureInPictureParams(params)
+            } catch (_: Exception) {
+            }
+            val entered = try {
+                act.enterPictureInPictureMode(params)
+            } catch (e: Exception) {
+                Log.w(TAG, "enterPictureInPictureMode failed (FLAG_SECURE kept): ${e.message}")
+                false
+            }
+            if (entered || act.isInPictureInPictureMode) {
+                startPictureInPictureListenerTimer(player)
+            } else {
+                Log.w(TAG, "PiP did not enter; FLAG_SECURE was not cleared")
+                restoreActivityAfterPip()
+            }
         }
     }
 
     private fun disablePictureInPicture(player: BetterPlayer) {
         stopPipHandler()
-        activity!!.moveTaskToBack(false)
+        val act = activity
+        val wasInPip = act?.isInPictureInPictureMode == true
+        pipEnterOnLeave = false
+        pipLeavePlayer = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                activity?.setPictureInPictureParams(
+                    PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(16, 9))
+                        .setAutoEnterEnabled(false)
+                        .build()
+                )
+            } catch (_: Exception) {
+            }
+        }
+        // Only move the task behind Home to exit an actual PiP window. Failed
+        // PiP-entry cleanup also calls this method; moving the task in that
+        // case unexpectedly backgrounds the whole app after screen lock.
+        if (wasInPip) act?.moveTaskToBack(false)
         player.onPictureInPictureStatusChanged(false)
         player.disposeMediaSession()
+        restoreActivityAfterPip()
+    }
+
+    private fun prepareActivityForPip(act: Activity) {
+        // Keep FLAG_SECURE: PiP uses the same activity window; captures black out.
+        // Do not clear secure for mini arming or enterPictureInPictureMode.
+        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+
+    private fun restoreActivityAfterPip() {
+        val act = activity ?: return
+        // Keep UNSPECIFIED so SystemChrome can rotate after PiP. Restoring
+        // SCREEN_ORIENTATION_PORTRAIT left the activity portrait while the
+        // player still used landscape/fullscreen layout.
+        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        pipRefreshHandler.removeCallbacksAndMessages(null)
+        pipRefreshScheduled = false
+        lastPipSourceRect = null
     }
 
     private fun startPictureInPictureListenerTimer(player: BetterPlayer) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            pipEntered = false
+            pipEnterDeadline = SystemClock.uptimeMillis() + 2000
             pipHandler = Handler(Looper.getMainLooper())
             pipRunnable = Runnable {
-                if (activity!!.isInPictureInPictureMode) {
-                    pipHandler!!.postDelayed(pipRunnable!!, 100)
-                } else {
-                    player.onPictureInPictureStatusChanged(false)
-                    player.disposeMediaSession()
-                    stopPipHandler()
+                val act = activity
+                // activity==null is unknown (detach/config) — do NOT emit pipStop;
+                // a false pipStop makes Flutter restore mini/tabs into the PiP window.
+                if (act == null) {
+                    pipHandler?.postDelayed(pipRunnable!!, 250)
+                    return@Runnable
+                }
+                val inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
+                    act.isInPictureInPictureMode
+                when {
+                    inPip -> {
+                        if (!pipEntered) {
+                            pipEntered = true
+                            player.onPictureInPictureStatusChanged(true)
+                            // Force a PiP bounds refresh after enter — same effect
+                            // as OEM double-tap resize that makes blank video appear.
+                            schedulePipFirstFrameRefresh(player)
+                        }
+                        pipHandler?.postDelayed(pipRunnable!!, 250)
+                    }
+                    !pipEntered && SystemClock.uptimeMillis() < pipEnterDeadline -> {
+                        pipHandler?.postDelayed(pipRunnable!!, 100)
+                    }
+                    else -> {
+                        player.onPictureInPictureStatusChanged(false)
+                        player.disposeMediaSession()
+                        restoreActivityAfterPip()
+                        stopPipHandler()
+                    }
                 }
             }
-            pipHandler!!.post(pipRunnable!!)
+            pipHandler?.postDelayed(pipRunnable!!, 400)
         }
+    }
+
+    /**
+     * Previously rebinding / nudging aspect on enter caused visible flicker.
+     * Keep a no-op latch so callers stay safe; blank first frames are rare
+     * with sourceRectHint + seamless resize.
+     */
+    private fun schedulePipFirstFrameRefresh(player: BetterPlayer) {
+        if (pipRefreshScheduled) return
+        pipRefreshScheduled = true
+        // Intentionally do not rebind or change aspect on enter — that was the
+        // remaining single flash after multi-nudge was removed.
     }
 
     private fun dispose(player: BetterPlayer, textureId: Long) {
@@ -528,6 +792,10 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         videoPlayers.remove(textureId)
         dataSources.remove(textureId)
         stopPipHandler()
+    }
+
+    private fun disposeAdView(player: BetterPlayer) {
+        player.removeAdsView()
     }
 
     private fun stopPipHandler() {
@@ -606,6 +874,19 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         const val HEADER_PARAMETER = "header_"
         const val FILE_PATH_PARAMETER = "filePath"
         const val ACTIVITY_NAME_PARAMETER = "activityName"
+        @JvmStatic
+        @Volatile
+        private var instance: BetterPlayerPlugin? = null
+
+        /**
+         * Forward Activity [onPictureInPictureModeChanged] so Dart `isPip` flips
+         * as soon as the system enters/exits PiP (covers mini auto-enter races).
+         */
+        @JvmStatic
+        fun onActivityPictureInPictureModeChanged(inPip: Boolean) {
+            instance?.handleActivityPictureInPictureModeChanged(inPip)
+        }
+
         const val MIN_BUFFER_MS = "minBufferMs"
         const val MAX_BUFFER_MS = "maxBufferMs"
         const val BUFFER_FOR_PLAYBACK_MS = "bufferForPlaybackMs"
@@ -625,8 +906,12 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val SET_TRACK_PARAMETERS_METHOD = "setTrackParameters"
         private const val SET_AUDIO_TRACK_METHOD = "setAudioTrack"
         private const val ENABLE_PICTURE_IN_PICTURE_METHOD = "enablePictureInPicture"
+        private const val SET_PIP_ENTER_ON_LEAVE_METHOD = "setPipEnterOnLeave"
+        private const val PAUSE_AND_HIDE_MEDIA_SESSION_METHOD = "pauseAndHideMediaSession"
         private const val DISABLE_PICTURE_IN_PICTURE_METHOD = "disablePictureInPicture"
         private const val IS_PICTURE_IN_PICTURE_SUPPORTED_METHOD = "isPictureInPictureSupported"
+        private const val IS_ACTIVITY_IN_PICTURE_IN_PICTURE_MODE_METHOD =
+            "isActivityInPictureInPictureMode"
         private const val CHECK_PICTURE_IN_PICTURE_PERMISSION_METHOD = "checkPictureInPicturePermission"
         private const val OPEN_PICTURE_IN_PICTURE_PERMISSION_SETTINGS_METHOD = "openPictureInPicturePermissionSettings"
         private const val SET_MIX_WITH_OTHERS_METHOD = "setMixWithOthers"
@@ -639,5 +924,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         private const val IS_AD_PLAYING = "isAdPlaying"
         private const val CONTENT_DURATION = "contentDuration"
         private const val CONTENT_POSITION = "contentPosition"
+        private const val PLAY_WHEN_READY_TRUE = "playWhenReadyTrue"
+        private const val PLAY_WHEN_READY_FALSe = "playWhenReadyFalse"
     }
 }

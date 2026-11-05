@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:better_player/src/configuration/better_player_controls_configuration.dart';
 import 'package:better_player/src/controls/better_player_controls_state.dart';
 import 'package:better_player/src/controls/better_player_cupertino_progress_bar.dart';
@@ -66,9 +67,13 @@ class _BetterPlayerCupertinoControlsState
     _betterPlayerController = BetterPlayerController.of(context);
 
     if (_latestValue?.hasError == true) {
-      return Container(
-        color: Colors.black,
-        child: _buildErrorWidget(),
+      // Expand so errorBuilder Stack/Positioned uses full player bounds,
+      // not the shrink-wrapped message size (back must stay top-left).
+      return SizedBox.expand(
+        child: ColoredBox(
+          color: Colors.black,
+          child: _buildErrorWidget(),
+        ),
       );
     }
 

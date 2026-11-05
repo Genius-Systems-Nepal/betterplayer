@@ -19,7 +19,7 @@ class BetterPlayerTranslations {
       this.generalDefaultError = "Video can't be played",
       this.generalNone = "None",
       this.generalDefault = "Default",
-      this.generalRetry = "Retry",
+      this.generalRetry = "Could not load the content",
       this.playlistLoadingNextVideo = "Loading next video",
       this.controlsLive = "LIVE",
       this.controlsNextVideoIn = "Next video in",

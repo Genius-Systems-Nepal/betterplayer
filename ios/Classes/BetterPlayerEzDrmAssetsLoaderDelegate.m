@@ -27,14 +27,15 @@ NSString * DEFAULT_LICENSE_SERVER_URL = @"https://fps.ezdrm.com/api/licenses/";
 - (NSData *)getContentKeyAndLeaseExpiryFromKeyServerModuleWithRequest:(NSData*)requestBytes and:(NSString *)assetId and:(NSString *)customParams and:(NSError *)errorOut {
     NSData * decodedData;
     NSURLResponse * response;
-    
-    NSURL * finalLicenseURL;
-    if (_licenseURL != [NSNull null]){
-        finalLicenseURL = _licenseURL;
+
+    // When Dart already supplies a full license URL (incl. CustomData), POST as-is.
+    NSURL *ksmURL;
+    if (_licenseURL != [NSNull null] && _licenseURL != nil) {
+        ksmURL = _licenseURL;
     } else {
-        finalLicenseURL = [[NSURL alloc] initWithString: DEFAULT_LICENSE_SERVER_URL];
+        NSURL *finalLicenseURL = [[NSURL alloc] initWithString:DEFAULT_LICENSE_SERVER_URL];
+        ksmURL = [[NSURL alloc] initWithString:[NSString stringWithFormat:@"%@%@%@", finalLicenseURL, assetId, customParams]];
     }
-    NSURL * ksmURL = [[NSURL alloc] initWithString: [NSString stringWithFormat:@"%@%@%@",finalLicenseURL,assetId,customParams]];
     
     NSMutableURLRequest * request = [[NSMutableURLRequest alloc] initWithURL:ksmURL];
     [request setHTTPMethod:@"POST"];

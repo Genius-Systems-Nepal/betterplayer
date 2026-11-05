@@ -56,7 +56,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setMixWithOthers:(bool)mixWithOthers;
 - (void)seekTo:(int)location;
 - (void)setDataSourceAsset:(NSString*)asset withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration withDrmToken: (NSString *)drmToken;
-- (void)setDataSourceURL:(NSURL*)url withKey:(NSString*)key withCertificateUrl:(NSString*)certificateUrl withLicenseUrl:(NSString*)licenseUrl withHeaders:(NSDictionary*)headers withCache:(BOOL)useCache cacheKey:(NSString*)cacheKey cacheManager:(CacheManager*)cacheManager overriddenDuration:(int) overriddenDuration videoExtension: (NSString*) videoExtension adsUrl: (NSString*) adsUrl withDrmToken: (NSString *)drmToken ;
+
+- (void)setDataSourceURL:(NSURL *)url withKey:(NSString *)key withCertificateUrl:(NSString *)certificateUrl withLicenseUrl:(NSString *)licenseUrl withHeaders:(NSDictionary *)headers withCache:(BOOL)useCache cacheKey:(NSString *)cacheKey cacheManager:(CacheManager *)cacheManager overriddenDuration:(int)overriddenDuration videoExtension:(NSString *)videoExtension adsUrl:(NSString *)adsUrl withDrmToken:(NSString *)drmToken cmcdConfig:(NSDictionary * _Nullable)cmcdConfig;
 - (void)setVolume:(double)volume;
 - (void)setSpeed:(double)speed result:(FlutterResult)result;
 - (void) setAudioTrack:(NSString*) name index:(int) index;
@@ -64,6 +65,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void) enablePictureInPicture: (CGRect) frame;
 - (void)setPictureInPicture:(BOOL)pictureInPicture;
 - (void)disablePictureInPicture;
+/// Mini-only: arm automatic system PiP when the app leaves foreground.
+- (void)setPipEnterOnLeave:(BOOL)enabled;
+/// Pause AVPlayer and clear Now Playing so Dynamic Island / lock-screen media go away.
+- (void)pauseAndHideMediaSession;
 - (int64_t)absolutePosition;
 - (int64_t) FLTCMTimeToMillis:(CMTime) time;
 - (void)toggleNerdStat;
