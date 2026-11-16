@@ -943,8 +943,7 @@ class BetterPlayerController {
     final position = await videoPlayerController!.position;
     final wasPlayingBeforeChange = isPlaying()!;
     pause();
-    await setupDataSource(
-        betterPlayerDataSource!.copyWith(url: url, adsUrl: adsUrl));
+    await setupDataSource(betterPlayerDataSource!.copyWith(url: url, adsUrl: adsUrl));
     seekTo(position!);
     if (wasPlayingBeforeChange) {
       play();
@@ -1101,9 +1100,7 @@ class BetterPlayerController {
           return;
         }
         final RenderBox? renderBox = pipContext.findRenderObject() as RenderBox?;
-        if (renderBox == null || !renderBox.hasSize ||
-            renderBox.size.width <= 0 ||
-            renderBox.size.height <= 0) {
+        if (renderBox == null || !renderBox.hasSize || renderBox.size.width <= 0 || renderBox.size.height <= 0) {
           BetterPlayerUtils.log("Can't show PiP. RenderBox is null or empty. Did you provide valid global"
               " key?");
           return;

@@ -30,7 +30,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> nerdStat(int? textureId) async{
+  Future<void> nerdStat(int? textureId) async {
     return await _channel.invokeMethod<void>(
       'nerdStat',
       <String, dynamic>{
@@ -40,7 +40,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> playWhenReadyTrue(int? textureId) async{
+  Future<void> playWhenReadyTrue(int? textureId) async {
     return await _channel.invokeMethod<void>(
       'playWhenReadyTrue',
       <String, dynamic>{
@@ -50,7 +50,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> playWhenReadyFalse(int? textureId) async{
+  Future<void> playWhenReadyFalse(int? textureId) async {
     return await _channel.invokeMethod<void>(
       'playWhenReadyFalse',
       <String, dynamic>{
@@ -60,10 +60,8 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<int?> create({
-    BetterPlayerBufferingConfiguration? bufferingConfiguration,
-    Map<String, dynamic>? quanteecConfig
-  }) async {
+  Future<int?> create(
+      {BetterPlayerBufferingConfiguration? bufferingConfiguration, Map<String, dynamic>? quanteecConfig}) async {
     late final Map<String, dynamic>? response;
     if (bufferingConfiguration == null) {
       response = await _channel.invokeMapMethod<String, dynamic>('create');
@@ -74,15 +72,12 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'minBufferMs': bufferingConfiguration.minBufferMs,
           'maxBufferMs': bufferingConfiguration.maxBufferMs,
           'bufferForPlaybackMs': bufferingConfiguration.bufferForPlaybackMs,
-          'bufferForPlaybackAfterRebufferMs':
-              bufferingConfiguration.bufferForPlaybackAfterRebufferMs,
+          'bufferForPlaybackAfterRebufferMs': bufferingConfiguration.bufferForPlaybackAfterRebufferMs,
           'quanteecConfig': quanteecConfig
         },
       );
 
-      response = responseLinkedHashMap != null
-          ? Map<String, dynamic>.from(responseLinkedHashMap)
-          : null;
+      response = responseLinkedHashMap != null ? Map<String, dynamic>.from(responseLinkedHashMap) : null;
     }
     return response?['textureId'] as int?;
   }
@@ -251,8 +246,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> setTrackParameters(
-      int? textureId, int? width, int? height, int? bitrate) {
+  Future<void> setTrackParameters(int? textureId, int? width, int? height, int? bitrate) {
     return _channel.invokeMethod<void>(
       'setTrackParameters',
       <String, dynamic>{
@@ -288,9 +282,9 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   @override
   Future<DateTime?> getAbsolutePosition(int? textureId) async {
     final int milliseconds = await _channel.invokeMethod<int>(
-      'absolutePosition',
-      <String, dynamic>{'textureId': textureId},
-    ) ??
+          'absolutePosition',
+          <String, dynamic>{'textureId': textureId},
+        ) ??
         0;
 
     if (milliseconds <= 0) return null;
@@ -305,8 +299,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> enablePictureInPicture(int? textureId, double? top, double? left,
-      double? width, double? height) async {
+  Future<void> enablePictureInPicture(int? textureId, double? top, double? left, double? width, double? height) async {
     return _channel.invokeMethod<void>(
       'enablePictureInPicture',
       <String, dynamic>{
@@ -448,9 +441,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
 
   @override
   Stream<VideoEvent> videoEventsFor(int? textureId) {
-    return _eventChannelFor(textureId)
-        .receiveBroadcastStream()
-        .map((dynamic event) {
+    return _eventChannelFor(textureId).receiveBroadcastStream().map((dynamic event) {
       late Map<dynamic, dynamic> map;
       if (event is Map) {
         map = event;
@@ -546,17 +537,11 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
 
         case 'nerdStat':
           dynamic values = map["values"];
-          return VideoEvent(
-              eventType: VideoEventType.nerdStat,
-              key: key,
-              nerdStat: values);
+          return VideoEvent(eventType: VideoEventType.nerdStat, key: key, nerdStat: values);
 
         case 'bitrateUpdate':
           dynamic values = map["values"];
-          return VideoEvent(
-              eventType: VideoEventType.bitrateUpdate,
-              key: key,
-              bitrateUpdate: values);
+          return VideoEvent(eventType: VideoEventType.bitrateUpdate, key: key, bitrateUpdate: values);
 
         case 'adStarted':
           return VideoEvent(eventType: VideoEventType.adStarted, key: key);

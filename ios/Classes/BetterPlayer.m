@@ -98,6 +98,9 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     NSInteger _pipStartGeneration;
     /// Grace timer already scheduled for this background transition.
     BOOL _pipFailWatchArmed;
+    /// Screen locked — pause local AV (expanded or PiP) and block keep-alive
+    /// so lock cannot leave background audio / Now Playing active.
+    BOOL _pausedForDisplayLock;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame dictQuanteecConfig:(NSDictionary * _Nullable)dictQuanteecConfig {
@@ -112,6 +115,7 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     _pipStopping = false;
     _pipExpandingToApp = false;
     _pipResumeAfterStop = false;
+    _pausedForDisplayLock = false;
     _player = [[AVPlayer alloc] init];
 
     //TODO: handle quanteec when package available
@@ -187,20 +191,31 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     }
 }
 
-/// Screen lock: pause PiP / local AV and notify Dart (same event as Android
-/// ACTION_SCREEN_OFF) so background hold cannot force play with the display off.
-- (void)applicationProtectedDataWillBecomeUnavailable:(NSNotification *)notification {
+/// Screen lock (expanded details player or PiP): hard-pause, clear Now Playing,
+/// and latch so armed auto-PiP / keep-alive cannot restart background audio.
+- (void)_pauseForDisplayLockAndNotify {
     if (_disposed) {
         return;
     }
+    _pausedForDisplayLock = YES;
+    _pipFailWatchArmed = NO;
     _pipDesiredPlaying = NO;
     _isPlaying = false;
     if (_player != nil) {
         [_player pause];
     }
+    [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = @{};
     if (_eventSink != nil) {
+        // pause first so chrome flags clear, then displayTurnedOff for Dart latch.
+        _eventSink(@{@"event" : @"pause"});
         _eventSink(@{@"event" : @"displayTurnedOff"});
     }
+}
+
+/// Screen lock: pause PiP / local AV and notify Dart (same event as Android
+/// ACTION_SCREEN_OFF) so background hold cannot force play with the display off.
+- (void)applicationProtectedDataWillBecomeUnavailable:(NSNotification *)notification {
+    [self _pauseForDisplayLockAndNotify];
 }
 
 /// Stop playback and system PiP when the screen is recorded/mirrored (no FLAG_SECURE on iOS).
@@ -537,6 +552,7 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     _isPlaying = false;
     _pipDesiredPlaying = false;
     _pipEnterOnLeave = false;
+    _pausedForDisplayLock = false;
     _disposed = false;
     _failedCount = 0;
     _key = nil;
@@ -1079,6 +1095,11 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         return;
     }
 #if TARGET_OS_IOS
+    // Screen lock latch — Dart keep-alive / auto-PiP must not restart AV.
+    if (_pausedForDisplayLock) {
+        NSLog(@"[pip-arm] play ignored — display locked self=%p", self);
+        return;
+    }
     if (@available(iOS 11.0, *)) {
         // Do not start (or arm PiP) while screen capture is active.
         if (UIScreen.mainScreen.isCaptured) {
@@ -1117,6 +1138,13 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     // Flutter/engine often pauses on inactive. If mini armed us for background
     // PiP, start/keep system PiP instead of Dynamic Island audio-only.
     // Expanded (normal/landscape) must allow a real pause — no auto PiP.
+    if (_pausedForDisplayLock) {
+        // Real pause for screen lock — do not convert into PiP keep-alive.
+        _isPlaying = false;
+        _pipDesiredPlaying = false;
+        [self updatePlayingState];
+        return;
+    }
     UIApplicationState appState = [UIApplication sharedApplication].applicationState;
     leavingForeground = _appInBackground || appState != UIApplicationStateActive;
     if (_pipEnterOnLeave && _pipDesiredPlaying && leavingForeground) {
@@ -1512,7 +1540,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 /// Keep AVPlayer running while system PiP is active (background must not pause it).
 - (void)keepPipPlayingIfNeeded {
-    if (_disposed || !_pipDesiredPlaying || ![self isPipActive]) {
+    if (_disposed || _pausedForDisplayLock || !_pipDesiredPlaying || ![self isPipActive]) {
         return;
     }
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:nil];
@@ -1537,6 +1565,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
             return;
         }
     }
+    if (_pausedForDisplayLock) {
+        return;
+    }
     if (_pipDesiredPlaying && [self isPipActive]) {
         [self keepPipPlayingIfNeeded];
         return;
@@ -1560,6 +1591,15 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
             [self forcePauseForScreenCapture];
             return;
         }
+    }
+    // Screen lock (details expanded or PiP): never keep BG audio / Now Playing.
+    // Protected-data notify can race after this; also catch lock via
+    // isProtectedDataAvailable when the notification has not fired yet.
+    if (_pausedForDisplayLock ||
+        ![UIApplication sharedApplication].isProtectedDataAvailable) {
+        NSLog(@"[pip-arm] didEnterBackground display locked → pauseAndHide self=%p", self);
+        [self _pauseForDisplayLockAndNotify];
+        return;
     }
     // A live PiP window must keep playing even if arm flags were cleared
     // by a racing pause/clear on the way to background.
@@ -1587,6 +1627,12 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                 return;
             }
             strongSelf->_pipFailWatchArmed = NO;
+            if (strongSelf->_pausedForDisplayLock ||
+                ![UIApplication sharedApplication].isProtectedDataAvailable) {
+                NSLog(@"[pip-arm] didEnterBackground grace → display locked");
+                [strongSelf _pauseForDisplayLockAndNotify];
+                return;
+            }
             if ([strongSelf isPipActive]) {
                 NSLog(@"[pip-arm] didEnterBackground PiP active OK");
                 [strongSelf keepPipPlayingIfNeeded];
@@ -1616,11 +1662,13 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
     _appInBackground = NO;
+    _pausedForDisplayLock = NO;
     _pipStartGeneration = 0;
     // Drop any leftover root overlay from older PiP paths (dual-frame bug).
     [self _removeOverlayPipLayerIfNeeded];
     // Expand-from-PiP: layer frame is still the PiP window until layout.
     [_thisView setNeedsLayout];
+    // Do not auto-resume after screen lock — Dart clears the latch without play.
     if (_pipDesiredPlaying && [self isPipActive]) {
         [self keepPipPlayingIfNeeded];
     }
@@ -1647,6 +1695,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
 - (void)startPictureInPictureNow {
     if (@available(iOS 9.0, *)) {
+        if (_pausedForDisplayLock) {
+            NSLog(@"[pip-arm] startPictureInPictureNow ignored — display locked self=%p", self);
+            return;
+        }
         if (@available(iOS 11.0, *)) {
             if (UIScreen.mainScreen.isCaptured) {
                 [self forcePauseForScreenCapture];

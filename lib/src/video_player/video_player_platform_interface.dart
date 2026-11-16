@@ -46,8 +46,7 @@ abstract class VideoPlayerPlatform {
       try {
         instance._verifyProvidesDefaultImplementations();
       } catch (_) {
-        throw AssertionError(
-            'Platform interfaces must not be implemented with `implements`');
+        throw AssertionError('Platform interfaces must not be implemented with `implements`');
       }
     }
     _instance = instance;
@@ -118,8 +117,7 @@ abstract class VideoPlayerPlatform {
   }
 
   /// Sets the video track parameters (used to select quality of the video)
-  Future<void> setTrackParameters(
-      int? textureId, int? width, int? height, int? bitrate) {
+  Future<void> setTrackParameters(int? textureId, int? width, int? height, int? bitrate) {
     throw UnimplementedError('setTrackParameters() has not been implemented.');
   }
 
@@ -139,10 +137,8 @@ abstract class VideoPlayerPlatform {
   }
 
   ///Enables PiP mode.
-  Future<void> enablePictureInPicture(int? textureId, double? top, double? left,
-      double? width, double? height) {
-    throw UnimplementedError(
-        'enablePictureInPicture() has not been implemented.');
+  Future<void> enablePictureInPicture(int? textureId, double? top, double? left, double? width, double? height) {
+    throw UnimplementedError('enablePictureInPicture() has not been implemented.');
   }
 
   /// Android: arm system PiP for the next user-leave (mini → background).
@@ -157,19 +153,16 @@ abstract class VideoPlayerPlatform {
 
   ///Disables PiP mode.
   Future<void> disablePictureInPicture(int? textureId) {
-    throw UnimplementedError(
-        'disablePictureInPicture() has not been implemented.');
+    throw UnimplementedError('disablePictureInPicture() has not been implemented.');
   }
 
   Future<bool?> isPictureInPictureEnabled(int? textureId) {
-    throw UnimplementedError(
-        'isPictureInPictureEnabled() has not been implemented.');
+    throw UnimplementedError('isPictureInPictureEnabled() has not been implemented.');
   }
 
   /// Android: true only when the Activity is currently in system PiP.
   Future<bool?> isActivityInPictureInPictureMode(int? textureId) {
-    throw UnimplementedError(
-        'isActivityInPictureInPictureMode() has not been implemented.');
+    throw UnimplementedError('isActivityInPictureInPictureMode() has not been implemented.');
   }
 
   Future<bool?> checkPipPermission(int? textureId) {
@@ -177,8 +170,7 @@ abstract class VideoPlayerPlatform {
   }
 
   Future<void> openPipPermissionSettings(int? textureId) {
-    throw UnimplementedError(
-        'openPipPermissionSettings() has not been implemented.');
+    throw UnimplementedError('openPipPermissionSettings() has not been implemented.');
   }
 
   ///Remove ad views
@@ -295,6 +287,7 @@ class DataSource {
   /// This will be in different formats depending on the [DataSourceType] of
   /// the original video.
   final String? uri;
+
   /// ads uri
   final String? adsUri;
 
@@ -488,11 +481,7 @@ class VideoEvent {
   }
 
   @override
-  int get hashCode =>
-      eventType.hashCode ^
-      duration.hashCode ^
-      size.hashCode ^
-      buffered.hashCode;
+  int get hashCode => eventType.hashCode ^ duration.hashCode ^ size.hashCode ^ buffered.hashCode;
 }
 
 /// Type of the event.
@@ -595,10 +584,7 @@ class DurationRange {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is DurationRange &&
-          runtimeType == other.runtimeType &&
-          start == other.start &&
-          end == other.end;
+      other is DurationRange && runtimeType == other.runtimeType && start == other.start && end == other.end;
 
   @override
   int get hashCode => start.hashCode ^ end.hashCode;
