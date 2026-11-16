@@ -6,8 +6,10 @@ package com.jhomlala.better_player
 import android.app.Activity
 import android.app.AppOpsManager
 import android.app.PictureInPictureParams
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Rect
@@ -60,6 +62,10 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     private var pipRefreshScheduled = false
     private val pipRefreshHandler = Handler(Looper.getMainLooper())
 
+    /// Screen lock / display off — pause PiP (and any active player) so audio
+    /// cannot keep playing with the display off.
+    private var screenOffReceiver: BroadcastReceiver? = null
+
     override fun onAttachedToEngine(binding: FlutterPluginBinding) {
         val loader = FlutterLoader()
         flutterState = FlutterState(
@@ -81,6 +87,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
             binding.textureRegistry
         )
         flutterState?.startListening(this)
+        registerScreenOffReceiver(binding.applicationContext)
     }
 
 
@@ -88,6 +95,7 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         if (flutterState == null) {
             Log.wtf(TAG, "Detached from the engine before registering to it.")
         }
+        unregisterScreenOffReceiver(binding.applicationContext)
         disposeAllPlayers()
         releaseCache()
         flutterState?.stopListening()
@@ -155,6 +163,55 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         }
         videoPlayers.clear()
         dataSources.clear()
+    }
+
+    private fun registerScreenOffReceiver(context: Context) {
+        if (screenOffReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent?.action != Intent.ACTION_SCREEN_OFF) return
+                handleDisplayTurnedOff()
+            }
+        }
+        screenOffReceiver = receiver
+        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                context.registerReceiver(receiver, filter)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "registerScreenOffReceiver failed: ${e.message}")
+            screenOffReceiver = null
+        }
+    }
+
+    private fun unregisterScreenOffReceiver(context: Context) {
+        val receiver = screenOffReceiver ?: return
+        screenOffReceiver = null
+        try {
+            context.unregisterReceiver(receiver)
+        } catch (_: Exception) {
+        }
+    }
+
+    /// Lock / display off: pause active ExoPlayer (esp. Activity PiP) and notify
+    /// Dart so `_pipHoldPlayingInBackground` cannot force play again.
+    private fun handleDisplayTurnedOff() {
+        val player = pipLeavePlayer ?: findActivePlayer() ?: return
+        try {
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    player.onDisplayTurnedOff()
+                } catch (e: Exception) {
+                    Log.w(TAG, "onDisplayTurnedOff failed: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "handleDisplayTurnedOff failed: ${e.message}")
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {

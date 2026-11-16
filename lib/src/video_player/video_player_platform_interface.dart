@@ -530,6 +530,9 @@ enum VideoEventType {
   /// Picture in picture mode has been dismissed
   pipStop,
 
+  /// Device display turned off / locked while a player (often PiP) was active.
+  displayTurnedOff,
+
   /// An unknown event has been received.
   unknown,
 

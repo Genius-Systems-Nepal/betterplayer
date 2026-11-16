@@ -1304,6 +1304,21 @@ internal class BetterPlayer(
         eventSink.success(event)
     }
 
+    /// Screen lock / display off while PiP (or any active session): hard-pause
+    /// ExoPlayer + drop MediaSession, then notify Dart so hold-alive cannot
+    /// force play() again.
+    fun onDisplayTurnedOff() {
+        try {
+            exoPlayer?.playWhenReady = false
+            exoPlayer?.pause()
+        } catch (_: Exception) {
+        }
+        disposeMediaSession()
+        val event: MutableMap<String, Any> = HashMap()
+        event["event"] = "displayTurnedOff"
+        eventSink.success(event)
+    }
+
     /**
      * Keep / nudge the Flutter [SurfaceTexture] so PiP shows video. Prefer a
      * buffer-size update; only null-rebind when [forceRebind] or surface invalid

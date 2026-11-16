@@ -21,6 +21,9 @@ enum BetterPlayerEventType {
   changedResolution,
   pipStart,
   pipStop,
+
+  /// Device display turned off / locked (pause PiP; do not auto-resume).
+  displayTurnedOff,
   setupDataSource,
   bufferingStart,
   bufferingUpdate,

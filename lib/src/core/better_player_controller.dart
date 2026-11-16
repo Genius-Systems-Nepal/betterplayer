@@ -1241,6 +1241,9 @@ class BetterPlayerController {
       case VideoEventType.adEnded:
         _postEvent(BetterPlayerEvent(BetterPlayerEventType.adEnded));
         break;
+      case VideoEventType.displayTurnedOff:
+        _postEvent(BetterPlayerEvent(BetterPlayerEventType.displayTurnedOff));
+        break;
       default:
 
         ///TODO: Handle when needed

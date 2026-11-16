@@ -312,6 +312,11 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           // A teardown pause must not force platform pause once isPip clears.
           value = value.copyWith(isPip: false);
           break;
+        case VideoEventType.displayTurnedOff:
+          // Native already paused Exo/AV; sync local playing flag so PiP
+          // keep-alive listeners do not force play() again.
+          value = value.copyWith(isPlaying: false);
+          break;
         case VideoEventType.nerdStat:
           // Do not clear isPip — bitrate/nerd ticks must not end a PiP session.
           value = value.copyWith(nerdStatValue: event.nerdStat);

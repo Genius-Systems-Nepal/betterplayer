@@ -155,6 +155,7 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     [center removeObserver:self name:UIApplicationWillResignActiveNotification object:nil];
     [center removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
     [center removeObserver:self name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [center removeObserver:self name:UIApplicationProtectedDataWillBecomeUnavailable object:nil];
     if (@available(iOS 11.0, *)) {
         [center removeObserver:self name:UIScreenCapturedDidChangeNotification object:nil];
     }
@@ -170,6 +171,10 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
                selector:@selector(applicationDidEnterBackground:)
                    name:UIApplicationDidEnterBackgroundNotification
                  object:nil];
+    [center addObserver:self
+               selector:@selector(applicationProtectedDataWillBecomeUnavailable:)
+                   name:UIApplicationProtectedDataWillBecomeUnavailable
+                 object:nil];
     if (@available(iOS 11.0, *)) {
         [center addObserver:self
                    selector:@selector(screenCaptureDidChange:)
@@ -179,6 +184,22 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
         if (UIScreen.mainScreen.isCaptured) {
             [self forcePauseForScreenCapture];
         }
+    }
+}
+
+/// Screen lock: pause PiP / local AV and notify Dart (same event as Android
+/// ACTION_SCREEN_OFF) so background hold cannot force play with the display off.
+- (void)applicationProtectedDataWillBecomeUnavailable:(NSNotification *)notification {
+    if (_disposed) {
+        return;
+    }
+    _pipDesiredPlaying = NO;
+    _isPlaying = false;
+    if (_player != nil) {
+        [_player pause];
+    }
+    if (_eventSink != nil) {
+        _eventSink(@{@"event" : @"displayTurnedOff"});
     }
 }
 
@@ -1876,6 +1897,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     [center removeObserver:self name:UIApplicationWillResignActiveNotification object:nil];
     [center removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
     [center removeObserver:self name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [center removeObserver:self name:UIApplicationProtectedDataWillBecomeUnavailable object:nil];
     if (@available(iOS 11.0, *)) {
         [center removeObserver:self name:UIScreenCapturedDidChangeNotification object:nil];
     }

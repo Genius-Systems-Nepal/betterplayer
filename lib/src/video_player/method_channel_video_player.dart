@@ -538,6 +538,12 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
             key: key,
           );
 
+        case 'displayTurnedOff':
+          return VideoEvent(
+            eventType: VideoEventType.displayTurnedOff,
+            key: key,
+          );
+
         case 'nerdStat':
           dynamic values = map["values"];
           return VideoEvent(
