@@ -57,6 +57,7 @@ import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
+import com.google.android.exoplayer2.upstream.HttpDataSource
 import com.google.android.exoplayer2.util.Util
 import com.jhomlala.better_player.DataSourceUtils.attachBandwidthMeter
 import com.jhomlala.better_player.DataSourceUtils.getDataSourceFactory
@@ -640,6 +641,22 @@ internal class BetterPlayer(
         }
     }
 
+    /**
+     * Prefer a Dart-parseable detail string for Source/IO failures.
+     * ExoPlayer maps bad HTTP status to [PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS] (2004).
+     */
+    private fun formatPlayerErrorDetail(error: PlaybackException): String {
+        var cause: Throwable? = error.cause
+        while (cause != null) {
+            if (cause is HttpDataSource.InvalidResponseCodeException) {
+                val uri = cause.dataSpec?.uri?.toString().orEmpty()
+                return "HTTP ${cause.responseCode} uri=$uri code=${error.errorCode}"
+            }
+            cause = cause.cause
+        }
+        return "${error.errorCode}"
+    }
+
     private fun isDrmLicenseFailure(error: PlaybackException): Boolean {
         if (error.errorCode == PlaybackException.ERROR_CODE_DRM_UNSPECIFIED ||
             error.errorCode == PlaybackException.ERROR_CODE_DRM_LICENSE_EXPIRED ||
@@ -1058,7 +1075,11 @@ internal class BetterPlayer(
                     // MediaCodec TIMED_OUT / OMX decoder dead — recreate renderers, keep playing.
                     return
                 }
-                eventSink.error("VideoError", "Video player had error $error", "${error.errorCode}")
+                // VOD seek often fails on a media-chunk open (HTTP 5xx). Include the
+                // response code + URI so Dart can refresh auth and resume at position.
+                val detail = formatPlayerErrorDetail(error)
+                Log.e(TAG, "Player Source/IO error detail=$detail")
+                eventSink.error("VideoError", "Video player had error $error", detail)
             }
         })
         val reply: MutableMap<String, Any> = HashMap()

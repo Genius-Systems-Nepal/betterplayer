@@ -596,7 +596,6 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         }
         if (enabled && player != null) {
             try {
-                prepareActivityForPip(act)
                 player.setupMediaSession(flutterState!!.applicationContext)
             } catch (_: Exception) {
             }
