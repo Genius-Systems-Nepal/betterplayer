@@ -288,9 +288,11 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                 result.success(null)
             }
             PAUSE_AND_HIDE_MEDIA_SESSION_METHOD -> {
-                // iOS Cast path; Android just pauses local playback.
+                // Pause local playback and drop MediaSession so failed PiP /
+                // background-without-window cannot keep shade audio alive.
                 setPipEnterOnLeave(false, player)
                 player.pause()
+                player.disposeMediaSession()
                 result.success(null)
             }
             DISABLE_PICTURE_IN_PICTURE_METHOD -> {
@@ -590,6 +592,8 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
         pipLeavePlayer = if (enabled) player else null
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val act = activity ?: return
+        // Apply auto-enter immediately — Home/Recents on Android 12+ uses this
+        // before onUserLeaveHint; late/stale Dart arms previously missed the gesture.
         try {
             act.setPictureInPictureParams(buildPipParams(autoEnter = enabled))
         } catch (_: Exception) {
@@ -634,12 +638,26 @@ class BetterPlayerPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
     }
 
     private fun tryEnterPictureInPictureOnLeave() {
+        // Must be Dart-armed (mini/expanded + pip config). Sticky arm on the
+        // Flutter side keeps this true while content plays so Home/Recents
+        // always hits this path; do not enter for trailer/paused/unarmed play.
         if (!pipEnterOnLeave) return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val act = activity ?: return
         if (act.isInPictureInPictureMode) return
-        val player = pipLeavePlayer ?: findActivePlayer() ?: return
+        val player = pipLeavePlayer
+            ?: findPlayingPlayer()
+            ?: findActivePlayer()
+            ?: return
         enablePictureInPicture(player)
+    }
+
+    private fun findPlayingPlayer(): BetterPlayer? {
+        for (i in 0 until videoPlayers.size()) {
+            val player = videoPlayers.valueAt(i) ?: continue
+            if (player.isPlayWhenReady()) return player
+        }
+        return null
     }
 
     private fun findActivePlayer(): BetterPlayer? {

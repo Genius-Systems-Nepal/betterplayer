@@ -1143,6 +1143,9 @@ internal class BetterPlayer(
         exoPlayer?.playWhenReady = false
     }
 
+    /** True when ExoPlayer intends to play (used for Home/Recents PiP enter). */
+    fun isPlayWhenReady(): Boolean = exoPlayer?.playWhenReady == true
+
     fun setLooping(value: Boolean) {
         exoPlayer?.repeatMode = if (value) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
     }
