@@ -82,6 +82,15 @@ class BetterPlayerController {
   ///Subtitles lines for current data source.
   List<BetterPlayerSubtitle> subtitlesLines = [];
 
+  /// When false, [BetterPlayerSubtitlesDrawer] draws nothing (selected source kept).
+  /// Used to hide captions in mini / PiP without clearing the user track.
+  final ValueNotifier<bool> subtitlesOverlayVisible = ValueNotifier<bool>(true);
+
+  void setSubtitlesOverlayVisible(bool visible) {
+    if (subtitlesOverlayVisible.value == visible) return;
+    subtitlesOverlayVisible.value = visible;
+  }
+
   ///List of tracks available for current data source. Used only for HLS / DASH.
   List<BetterPlayerAsmsTrack> _betterPlayerAsmsTracks = [];
 
@@ -1382,6 +1391,7 @@ class BetterPlayerController {
       _videoEventStreamSubscription?.cancel();
       _disposed = true;
       _controllerEventStreamController.close();
+      subtitlesOverlayVisible.dispose();
 
       ///Delete files async
       _tempFiles.forEach((file) => file.delete());
