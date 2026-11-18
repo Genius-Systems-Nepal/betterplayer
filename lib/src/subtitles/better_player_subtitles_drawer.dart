@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:better_player/better_player.dart';
 import 'package:better_player/src/subtitles/better_player_subtitle.dart';
 import 'package:flutter/material.dart';
@@ -55,6 +56,7 @@ class _BetterPlayerSubtitlesDrawerState
 
     widget.betterPlayerController.videoPlayerController!
         .addListener(_updateState);
+    widget.betterPlayerController.subtitlesOverlayVisible.addListener(_onOverlayVisibilityChanged);
 
     _outerTextStyle = TextStyle(
         fontSize: _configuration!.fontSize,
@@ -75,8 +77,15 @@ class _BetterPlayerSubtitlesDrawerState
   @override
   void dispose() {
     widget.betterPlayerController.videoPlayerController?.removeListener(_updateState);
+    try {
+      widget.betterPlayerController.subtitlesOverlayVisible.removeListener(_onOverlayVisibilityChanged);
+    } catch (_) {}
     _visibilityStreamSubscription.cancel();
     super.dispose();
+  }
+
+  void _onOverlayVisibilityChanged() {
+    if (mounted) setState(() {});
   }
 
   ///Called when player state has changed, i.e. new player position, etc.
@@ -91,6 +100,11 @@ class _BetterPlayerSubtitlesDrawerState
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.betterPlayerController.subtitlesOverlayVisible.value) {
+      widget.betterPlayerController.renderedSubtitle = null;
+      return const SizedBox.shrink();
+    }
+
     final BetterPlayerSubtitle? subtitle = _getSubtitleAtCurrentPosition();
     widget.betterPlayerController.renderedSubtitle = subtitle;
     final List<String> subtitles = subtitle?.texts ?? [];
