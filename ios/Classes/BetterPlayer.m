@@ -55,7 +55,6 @@ static NSString* BetterPlayerCertificateUrlPreview(NSString* certificateUrl) {
             (unsigned long)certificateUrl.length];
 }
 
-
 #if TARGET_OS_IOS
 void (^__strong _Nullable _restoreUserInterfaceForPIPStopCompletionHandler)(BOOL);
 API_AVAILABLE(ios(9.0))
@@ -101,6 +100,14 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     /// Screen locked — pause local AV (expanded or PiP) and block keep-alive
     /// so lock cannot leave background audio / Now Playing active.
     BOOL _pausedForDisplayLock;
+    /// Bumped to cancel in-flight readiness retries when disarming / re-arming.
+    NSInteger _pipReadinessRetryGeneration;
+    /// One-shot pause→play after the inline layer is PiP-possible. Priming
+    /// playback this way makes first-Home automatic PiP reliable without
+    /// opening a system PiP window (user-confirmed; startPictureInPicture prewarm
+    /// caused a visible flash/cover).
+    BOOL _pipPlaybackPrimeDone;
+    BOOL _pipPlaybackPrimeInFlight;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame dictQuanteecConfig:(NSDictionary * _Nullable)dictQuanteecConfig {
@@ -116,6 +123,9 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     _pipExpandingToApp = false;
     _pipResumeAfterStop = false;
     _pausedForDisplayLock = false;
+    _pipReadinessRetryGeneration = 0;
+    _pipPlaybackPrimeDone = NO;
+    _pipPlaybackPrimeInFlight = NO;
     _player = [[AVPlayer alloc] init];
 
     //TODO: handle quanteec when package available
@@ -552,6 +562,7 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
     _isPlaying = false;
     _pipDesiredPlaying = false;
     _pipEnterOnLeave = false;
+    _pipReadinessRetryGeneration += 1;
     _pausedForDisplayLock = false;
     _disposed = false;
     _failedCount = 0;
@@ -621,7 +632,6 @@ static const NSInteger kMaxLiveEdgeRecoveries = 20;
         }
     }
 }
-
 
 static inline CGFloat radiansToDegrees(CGFloat radians) {
     // Input range [-pi, pi] or [-180, 180]
@@ -1048,7 +1058,6 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         CGFloat width = size.width;
         CGFloat height = size.height;
 
-
         AVAsset *asset = _player.currentItem.asset;
         bool onlyAudio =  [[asset tracksWithMediaType:AVMediaTypeVideo] count] == 0;
 
@@ -1233,7 +1242,6 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         _player.rate = _playerRate;
     }
 }
-
 
 - (void)setTrackParameters:(int) width: (int) height: (int)bitrate {
     if (width == 0 && height == 0 && bitrate == 0) {
@@ -1459,6 +1467,100 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     }
 }
 
+/// YES when the inline layer is in-window, sized, ready, and PiP-possible.
+- (BOOL)_isPipReadyForAutomaticStart {
+#if TARGET_OS_IOS
+    if (_thisView == nil || _thisView.window == nil) {
+        return NO;
+    }
+    AVPlayerLayer *layer = _thisView.playerLayer;
+    if (layer == nil) {
+        return NO;
+    }
+    CGSize bounds = layer.bounds.size;
+    if (bounds.width < 1.0 || bounds.height < 1.0) {
+        return NO;
+    }
+    if (!layer.isReadyForDisplay) {
+        return NO;
+    }
+    if (@available(iOS 9.0, *)) {
+        return _pipController != nil && _pipController.isPictureInPicturePossible;
+    }
+#endif
+    return NO;
+}
+
+/// Limited retries while armed until the inline layer is PiP-possible.
+/// Does not call startPictureInPicture (avoids -1001 cancel of auto-from-inline).
+- (void)_schedulePipReadinessRetriesIfNeeded {
+#if TARGET_OS_IOS
+    NSInteger generation = ++_pipReadinessRetryGeneration;
+    BOOL missingViewAtArm = (_thisView == nil);
+    NSLog(@"[pip-arm] native readinessRetry schedule gen=%ld missingView=%d",
+          (long)generation, missingViewAtArm ? 1 : 0);
+    [self _runPipReadinessRetryAttempt:0
+                            generation:generation
+                     missingViewAtArm:missingViewAtArm];
+#endif
+}
+
+- (void)_runPipReadinessRetryAttempt:(NSInteger)attempt
+                          generation:(NSInteger)generation
+                   missingViewAtArm:(BOOL)missingViewAtArm {
+#if TARGET_OS_IOS
+    static const NSInteger kMaxPipReadinessRetries = 4;
+    if (attempt >= kMaxPipReadinessRetries) {
+        [self _logPipReadiness:@"readinessRetry exhausted"];
+        return;
+    }
+    __weak BetterPlayer *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        BetterPlayer *strongSelf = weakSelf;
+        if (strongSelf == nil || strongSelf.disposed || !strongSelf->_pipEnterOnLeave) {
+            NSLog(@"[pip-arm] readinessRetry skip alive=%d disposed=%d armed=%d",
+                  strongSelf != nil ? 1 : 0,
+                  strongSelf != nil && strongSelf.disposed ? 1 : 0,
+                  strongSelf != nil && strongSelf->_pipEnterOnLeave ? 1 : 0);
+            return;
+        }
+        if (strongSelf->_pipReadinessRetryGeneration != generation) {
+            NSLog(@"[pip-arm] readinessRetry stale gen=%ld current=%ld",
+                  (long)generation, (long)strongSelf->_pipReadinessRetryGeneration);
+            return;
+        }
+        NSLog(@"[pip-arm] readinessRetry attempt=%ld thisView=%d playing=%d desired=%d",
+              (long)attempt,
+              strongSelf->_thisView != nil ? 1 : 0,
+              strongSelf->_isPlaying ? 1 : 0,
+              strongSelf->_pipDesiredPlaying ? 1 : 0);
+        [strongSelf ensurePipPreparedForAutomaticStart];
+        // Preserve prior thisView-nil recovery: kick play once the view appears.
+        if (missingViewAtArm &&
+            strongSelf->_thisView != nil &&
+            (strongSelf->_isPlaying || strongSelf->_pipDesiredPlaying)) {
+            NSLog(@"[pip-arm] readinessRetry play() after thisView recover");
+            [strongSelf play];
+        }
+        [strongSelf _logPipReadiness:
+            [NSString stringWithFormat:@"readinessRetry %ld", (long)attempt]];
+        if ([strongSelf _isPipReadyForAutomaticStart]) {
+            NSLog(@"[pip-arm] readinessRetry done possible=1");
+            [strongSelf _primePlaybackForPipIfNeeded];
+            return;
+        }
+        [strongSelf _runPipReadinessRetryAttempt:attempt + 1
+                                     generation:generation
+                              missingViewAtArm:missingViewAtArm];
+    });
+#else
+    (void)attempt;
+    (void)generation;
+    (void)missingViewAtArm;
+#endif
+}
+
 /// Mini-only arm: allow automatic AV PiP when the app backgrounds.
 - (void)setPipEnterOnLeave:(BOOL)enabled {
 #if TARGET_OS_IOS
@@ -1473,33 +1575,18 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
           _thisView != nil ? 1 : 0);
     if (enabled) {
         [self ensurePipPreparedForAutomaticStart];
-        // Drag-to-mini arms before the new UiKitView exists. Retry once the
-        // inline layer is in the hierarchy; play() rebinds PiP when armed.
-        if (_thisView == nil) {
-            NSLog(@"[pip-arm] native arm thisView nil → retry in 0.35s");
-            __weak BetterPlayer *weakSelf = self;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                BetterPlayer *strongSelf = weakSelf;
-                if (strongSelf == nil || strongSelf.disposed || !strongSelf->_pipEnterOnLeave) {
-                    NSLog(@"[pip-arm] native rebind skip alive=%d disposed=%d armed=%d",
-                          strongSelf != nil ? 1 : 0,
-                          strongSelf != nil && strongSelf.disposed ? 1 : 0,
-                          strongSelf != nil && strongSelf->_pipEnterOnLeave ? 1 : 0);
-                    return;
-                }
-                NSLog(@"[pip-arm] native rebind thisView=%d playing=%d desired=%d",
-                      strongSelf->_thisView != nil ? 1 : 0,
-                      strongSelf->_isPlaying ? 1 : 0,
-                      strongSelf->_pipDesiredPlaying ? 1 : 0);
-                [strongSelf ensurePipPreparedForAutomaticStart];
-                if (strongSelf->_isPlaying || strongSelf->_pipDesiredPlaying) {
-                    NSLog(@"[pip-arm] native rebind play()");
-                    [strongSelf play];
-                }
-            });
+        // Detail/NPL often arm before the layer is PiP-possible. Retry while
+        // armed (also covers drag-to-mini before UiKitView exists).
+        if (![self _isPipReadyForAutomaticStart]) {
+            [self _schedulePipReadinessRetriesIfNeeded];
+        } else {
+            [self _logPipReadiness:@"arm already possible"];
+            [self _primePlaybackForPipIfNeeded];
         }
     } else {
+        _pipReadinessRetryGeneration += 1;
+        _pipPlaybackPrimeDone = NO;
+        _pipPlaybackPrimeInFlight = NO;
         // Drop the controller. Flipping the automatic flag leaves iOS able to
         // start PiP from the normal player after mini was restored.
         if ([self isPipActive]) {
@@ -1572,9 +1659,8 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         [self keepPipPlayingIfNeeded];
         return;
     }
-    // Armed mini: canStartPictureInPictureAutomaticallyFromInline is already
-    // set. Calling startPictureInPicture here returns -1001 and cancels it.
-    // Unarmed resign (Control Center) must not pause either.
+    // Do not call startPictureInPicture here — returns AVKit -1001 even after
+    // disabling automatic (confirmed) and cancels first-Home PiP.
     if (_pipEnterOnLeave && (_pipDesiredPlaying || _isPlaying)) {
         [self _logPipReadiness:@"willResignActive automatic"];
     }
@@ -1612,15 +1698,14 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         return;
     }
     if (_pipEnterOnLeave && (_pipDesiredPlaying || _isPlaying)) {
-        // Automatic inline PiP owns this transition. Do not call
-        // startPictureInPicture from the background.
+        // Leave automatic-from-inline alone (no startPictureInPicture).
         NSLog(@"[pip-arm] didEnterBackground armed, waiting for automatic PiP self=%p", self);
         if (_pipFailWatchArmed) {
             return;
         }
         _pipFailWatchArmed = YES;
         __weak BetterPlayer *weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             BetterPlayer *strongSelf = weakSelf;
             if (strongSelf == nil || strongSelf.disposed) {
@@ -1664,6 +1749,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     _appInBackground = NO;
     _pausedForDisplayLock = NO;
     _pipStartGeneration = 0;
+    [self _applyPipEnterOnLeaveToController];
     // Drop any leftover root overlay from older PiP paths (dual-frame bug).
     [self _removeOverlayPipLayerIfNeeded];
     // Expand-from-PiP: layer frame is still the PiP window until layout.
@@ -1672,6 +1758,65 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (_pipDesiredPlaying && [self isPipActive]) {
         [self keepPipPlayingIfNeeded];
     }
+    if (_pipEnterOnLeave) {
+        [self _primePlaybackForPipIfNeeded];
+    }
+}
+
+/// Pause then play once after the inline layer is PiP-possible. Avoids the
+/// visible PiP start/stop prewarm; matches "pause then play then first Home works".
+- (void)_primePlaybackForPipIfNeeded {
+#if TARGET_OS_IOS
+    if (_disposed || !_pipEnterOnLeave) {
+        return;
+    }
+    if (_pipPlaybackPrimeDone || _pipPlaybackPrimeInFlight) {
+        return;
+    }
+    if (![self _isPipReadyForAutomaticStart]) {
+        return;
+    }
+    if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive) {
+        return;
+    }
+    if (_player == nil) {
+        return;
+    }
+    // Only prime while we intend to keep playing.
+    if (!_isPlaying && !_pipDesiredPlaying) {
+        return;
+    }
+    _pipPlaybackPrimeInFlight = YES;
+    NSLog(@"[pip-arm] playback prime pause→play self=%p", self);
+    [_player pause];
+    __weak BetterPlayer *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        BetterPlayer *strongSelf = weakSelf;
+        if (strongSelf == nil || strongSelf.disposed) {
+            return;
+        }
+        strongSelf->_pipPlaybackPrimeInFlight = NO;
+        strongSelf->_pipPlaybackPrimeDone = YES;
+        if (!strongSelf->_pipEnterOnLeave) {
+            return;
+        }
+        if (strongSelf->_pausedForDisplayLock) {
+            return;
+        }
+        strongSelf->_pipDesiredPlaying = YES;
+        strongSelf->_isPlaying = YES;
+        [strongSelf _applyPipEnterOnLeaveToController];
+        if (@available(iOS 10.0, *)) {
+            [strongSelf->_player
+                playImmediatelyAtRate:(strongSelf->_playerRate > 0 ? strongSelf->_playerRate
+                                                                   : 1.0)];
+        } else {
+            [strongSelf->_player play];
+        }
+        NSLog(@"[pip-arm] playback prime play resumed self=%p", strongSelf);
+    });
+#endif
 }
 
 - (void) enablePictureInPicture: (CGRect) frame{
@@ -1849,6 +1994,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController failedToStartPictureInPictureWithError:(NSError *)error {
     NSLog(@"[pip-arm] failedToStart %@ code=%ld %@",
           error.domain, (long)error.code, error.localizedDescription);
+    // A failed start used to leave _pipStartGeneration stuck > 0 so Home
+    // backups / didEnterBackground retries were ignored until foreground.
+    _pipStartGeneration = 0;
     [self _removeOverlayPipLayerIfNeeded];
     self._pictureInPicture = NO;
 }
@@ -1875,7 +2023,6 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     AVMediaSelectionGroup *audioSelectionGroup = [[[_player currentItem] asset] mediaSelectionGroupForMediaCharacteristic: AVMediaCharacteristicAudible];
     NSArray* options = audioSelectionGroup.options;
 
-
     for (int audioTrackIndex = 0; audioTrackIndex < [options count]; audioTrackIndex++) {
         AVMediaSelectionOption* option = [options objectAtIndex:audioTrackIndex];
         NSArray *metaDatas = [AVMetadataItem metadataItemsFromArray:option.commonMetadata withKey:@"title" keySpace:@"comn"];
@@ -1899,7 +2046,6 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:nil];
   }
 }
-
 
 #endif
 
@@ -1937,6 +2083,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     nerdStatTimer = nil;
     // Clear the arm first so pause() does not treat this as a Home transition.
     _pipEnterOnLeave = false;
+    _pipReadinessRetryGeneration += 1;
     _pipDesiredPlaying = false;
     [self pause];
     [self disposeSansEventChannel];
