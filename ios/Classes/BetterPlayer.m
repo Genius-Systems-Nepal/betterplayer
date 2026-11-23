@@ -1259,15 +1259,53 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         }
         return;
     }
+    // Manual: cap resolution to the chosen rung, clear peak so AVPlayer can climb
+    // off a stuck low variant (e.g. 240p→1080p), then re-apply peak after seek.
     _autoAbrPendingUnlock = NO;
     _autoAbrUnlockGeneration += 1;
-    _player.currentItem.preferredPeakBitRate = bitrate;
+    AVPlayerItem *item = _player.currentItem;
+    if (item == nil) {
+        return;
+    }
+    double peak = bitrate > 0 ? (double) bitrate : 0;
     if (@available(iOS 11.0, *)) {
-        if (width == 0 && height == 0){
-            _player.currentItem.preferredMaximumResolution = CGSizeZero;
+        if (width == 0 && height == 0) {
+            item.preferredMaximumResolution = CGSizeZero;
         } else {
-            _player.currentItem.preferredMaximumResolution = CGSizeMake(width, height);
+            item.preferredMaximumResolution = CGSizeMake(width, height);
         }
+    }
+    // Unlimited peak within max resolution — preferredPeakBitRate alone is only a
+    // ceiling and would leave playback on 240p when the estimate is still low.
+    item.preferredPeakBitRate = 0;
+    CMTime t = item.currentTime;
+    if (CMTIME_IS_VALID(t) && !CMTIME_IS_INDEFINITE(t)) {
+        [item cancelPendingSeeks];
+        __weak AVPlayer *weakPlayer = _player;
+        [_player seekToTime:t
+            toleranceBefore:kCMTimeZero
+             toleranceAfter:kCMTimeZero
+          completionHandler:^(BOOL finished) {
+              AVPlayer *player = weakPlayer;
+              if (!finished || player == nil) {
+                  return;
+              }
+              AVPlayerItem *current = player.currentItem;
+              if (current == nil) {
+                  return;
+              }
+              if (@available
+              (iOS
+              11.0, *)) {
+              if (width != 0 || height != 0) {
+                  current.preferredMaximumResolution = CGSizeMake(width, height);
+              }
+          }
+              // Prefer settling near the ladder bitrate after the switch.
+              current.preferredPeakBitRate = peak > 0 ? peak : 0;
+          }];
+    } else if (peak > 0) {
+        item.preferredPeakBitRate = peak;
     }
 }
 

@@ -1166,21 +1166,94 @@ internal class BetterPlayer(
         val parametersBuilder = trackSelector.buildUponParameters()
         val auto = width == 0 && height == 0 && bitrate == 0
         manualBitrateLock = !auto
+        // Keep audio (and other) overrides; only touch video.
+        parametersBuilder.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        if (auto) {
+            // Restore adaptive ABR: clear pinned video override + size/bitrate caps.
+            parametersBuilder.clearVideoSizeConstraints()
+            parametersBuilder.setMaxVideoBitrate(Int.MAX_VALUE)
+            trackSelector.setParameters(parametersBuilder)
+            logAbr(
+                "setTrack auto=true estimate=$lastBandwidthEstimate " +
+                        "maxBr=${trackSelector.parameters.maxVideoBitrate}"
+            )
+            return
+        }
+        // Manual quality: pin the matching video format so ABR cannot stay on 240p
+        // while the UI shows 1080p (max-only caps are insufficient).
         if (width != 0 && height != 0) {
             parametersBuilder.setMaxVideoSize(width, height)
         }
         if (bitrate != 0) {
             parametersBuilder.setMaxVideoBitrate(bitrate)
         }
-        if (auto) {
-            parametersBuilder.clearVideoSizeConstraints()
-            parametersBuilder.setMaxVideoBitrate(Int.MAX_VALUE)
+        val videoOverride = findVideoTrackOverride(width, height, bitrate)
+        if (videoOverride != null) {
+            parametersBuilder.addOverride(videoOverride)
         }
         trackSelector.setParameters(parametersBuilder)
         logAbr(
-            "setTrack auto=$auto ${width}x${height} bitrate=$bitrate " +
+            "setTrack auto=false ${width}x${height} bitrate=$bitrate " +
+                    "override=${videoOverride != null} " +
                     "estimate=$lastBandwidthEstimate " +
                     "maxBr=${trackSelector.parameters.maxVideoBitrate}"
+        )
+    }
+
+    /**
+     * Prefer an exact height (+bitrate when present) match; otherwise nearest height
+     * at or below the requested height so a manual pick always locks a rung.
+     */
+    private fun findVideoTrackOverride(
+        width: Int,
+        height: Int,
+        bitrate: Int
+    ): TrackSelectionOverrides.TrackSelectionOverride? {
+        val mappedTrackInfo = trackSelector.currentMappedTrackInfo ?: return null
+        var best: Triple<Int, Int, Int>? = null // renderer, group, track
+        var bestScore = Int.MAX_VALUE
+        for (rendererIndex in 0 until mappedTrackInfo.rendererCount) {
+            if (mappedTrackInfo.getRendererType(rendererIndex) != C.TRACK_TYPE_VIDEO) {
+                continue
+            }
+            val trackGroups = mappedTrackInfo.getTrackGroups(rendererIndex)
+            for (groupIndex in 0 until trackGroups.length) {
+                val group = trackGroups[groupIndex]
+                for (trackIndex in 0 until group.length) {
+                    val format = group.getFormat(trackIndex)
+                    val formatHeight = format.height
+                    val formatBitrate = format.bitrate
+                    if (formatHeight == Format.NO_VALUE && formatBitrate == Format.NO_VALUE) {
+                        continue
+                    }
+                    val heightDelta = when {
+                        height <= 0 || formatHeight == Format.NO_VALUE -> 0
+                        else -> kotlin.math.abs(formatHeight - height)
+                    }
+                    val bitrateDelta = when {
+                        bitrate <= 0 || formatBitrate == Format.NO_VALUE -> 0
+                        else -> kotlin.math.abs(formatBitrate - bitrate) / 1000
+                    }
+                    // Exact height wins; then bitrate proximity; prefer not exceeding request.
+                    val overHeightPenalty =
+                        if (height > 0 && formatHeight != Format.NO_VALUE && formatHeight > height) {
+                            10_000
+                        } else {
+                            0
+                        }
+                    val score = overHeightPenalty + heightDelta * 100 + bitrateDelta
+                    if (score < bestScore) {
+                        bestScore = score
+                        best = Triple(rendererIndex, groupIndex, trackIndex)
+                    }
+                }
+            }
+        }
+        val match = best ?: return null
+        val group = mappedTrackInfo.getTrackGroups(match.first)[match.second]
+        return TrackSelectionOverrides.TrackSelectionOverride(
+            group,
+            listOf(match.third)
         )
     }
 
