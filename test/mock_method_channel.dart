@@ -5,16 +5,18 @@ class MockMethodChannel {
   final MethodChannel channel = const MethodChannel("better_player_channel");
   final List<MethodChannel> eventsChannels = [];
 
-  Future<Object?>? handle(MethodCall methodCall) async {
-    if (methodCall.method == "create") {
-      final int id = getNextId();
-      _createEventChannel(id);
-      return _getCreateResult(id);
-    }
-    if (methodCall.method == "setDataSource") {
-      //return
-    }
-    return <String, String>{};
+  MockMethodChannel() {
+    // channel.setMockMethodCallHandler((MethodCall methodCall) async {
+    //   if (methodCall.method == "create") {
+    //     final int id = getNextId();
+    //     _createEventChannel(id);
+    //     return _getCreateResult(id);
+    //   }
+    //   if (methodCall.method == "setDataSource") {
+    //     return null;
+    //   }
+    //   return <String, String>{};
+    // });
   }
 
   int getNextId() {

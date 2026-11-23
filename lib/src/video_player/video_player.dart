@@ -36,6 +36,9 @@ class VideoPlayerValue {
     this.isPip = false,
     this.nerdStatValue = "",
     this.bitrateValue = 0,
+    this.selectedVideoWidth = 0,
+    this.selectedVideoHeight = 0,
+    this.selectedTrackBitrate = 0,
     this.errorCode = "0",
   });
 
@@ -44,8 +47,7 @@ class VideoPlayerValue {
 
   /// Returns an instance with a `null` [Duration] and the given
   /// [errorDescription].
-  VideoPlayerValue.erroneous(String errorDescription)
-      : this(duration: null, errorDescription: errorDescription);
+  VideoPlayerValue.erroneous(String errorDescription) : this(duration: null, errorDescription: errorDescription);
 
   /// The total duration of the video.
   ///
@@ -101,8 +103,17 @@ class VideoPlayerValue {
   /// Nerd stats
   final String nerdStatValue;
 
-  /// Bitrate
+  /// Bandwidth estimate (bits/sec) from the player.
   final int bitrateValue;
+
+  /// Currently selected video track width (Android ABR); 0 if unknown.
+  final int selectedVideoWidth;
+
+  /// Currently selected video track height (Android ABR); 0 if unknown.
+  final int selectedVideoHeight;
+
+  /// Currently selected track bitrate (Android ABR); 0 if unknown.
+  final int selectedTrackBitrate;
 
   /// ErrorCode
   final String errorCode;
@@ -120,41 +131,57 @@ class VideoPlayerValue {
     return aspectRatio;
   }
 
+  /// Sentinel so [copyWith] can clear [errorDescription] / [errorCode].
+  static const Object _unset = Object();
+
   /// Returns a new instance that has the same values as this current instance,
-  /// except for any overrides passed in as arguments to [copyWidth].
-  VideoPlayerValue copyWith(
-      {Duration? duration,
-      Size? size,
-      Duration? position,
-      DateTime? absolutePosition,
-      List<DurationRange>? buffered,
-      bool? isPlaying,
-      bool? isLooping,
-      bool? isBuffering,
-      double? volume,
-      String? errorDescription,
-      double? speed,
-      bool? isPip,
-      String? nerdStatValue,
-      int? bitrateValue,
-      String? errorCode}) {
+  /// except for any overrides passed in as arguments to [copyWith].
+  /// Pass `errorDescription: null` (or [clearError]) to clear a prior error —
+  /// `errorDescription ?? this.errorDescription` cannot clear once set.
+  VideoPlayerValue copyWith({
+    Duration? duration,
+    Size? size,
+    Duration? position,
+    DateTime? absolutePosition,
+    List<DurationRange>? buffered,
+    bool? isPlaying,
+    bool? isLooping,
+    bool? isBuffering,
+    double? volume,
+    Object? errorDescription = _unset,
+    double? speed,
+    bool? isPip,
+    String? nerdStatValue,
+    int? bitrateValue,
+    int? selectedVideoWidth,
+    int? selectedVideoHeight,
+    int? selectedTrackBitrate,
+    Object? errorCode = _unset,
+  }) {
     return VideoPlayerValue(
-        duration: duration ?? this.duration,
-        size: size ?? this.size,
-        position: position ?? this.position,
-        absolutePosition: absolutePosition ?? this.absolutePosition,
-        buffered: buffered ?? this.buffered,
-        isPlaying: isPlaying ?? this.isPlaying,
-        isLooping: isLooping ?? this.isLooping,
-        isBuffering: isBuffering ?? this.isBuffering,
-        volume: volume ?? this.volume,
-        speed: speed ?? this.speed,
-        errorDescription: errorDescription ?? this.errorDescription,
-        isPip: isPip ?? this.isPip,
-        nerdStatValue: nerdStatValue ?? this.nerdStatValue,
-        bitrateValue: bitrateValue ?? this.bitrateValue,
-        errorCode: errorCode ?? this.errorCode);
+      duration: duration ?? this.duration,
+      size: size ?? this.size,
+      position: position ?? this.position,
+      absolutePosition: absolutePosition ?? this.absolutePosition,
+      buffered: buffered ?? this.buffered,
+      isPlaying: isPlaying ?? this.isPlaying,
+      isLooping: isLooping ?? this.isLooping,
+      isBuffering: isBuffering ?? this.isBuffering,
+      volume: volume ?? this.volume,
+      speed: speed ?? this.speed,
+      errorDescription: identical(errorDescription, _unset) ? this.errorDescription : errorDescription as String?,
+      isPip: isPip ?? this.isPip,
+      nerdStatValue: nerdStatValue ?? this.nerdStatValue,
+      bitrateValue: bitrateValue ?? this.bitrateValue,
+      selectedVideoWidth: selectedVideoWidth ?? this.selectedVideoWidth,
+      selectedVideoHeight: selectedVideoHeight ?? this.selectedVideoHeight,
+      selectedTrackBitrate: selectedTrackBitrate ?? this.selectedTrackBitrate,
+      errorCode: identical(errorCode, _unset) ? this.errorCode : (errorCode as String? ?? '0'),
+    );
   }
+
+  /// Drop sticky error so auto-retry / re-setup can succeed.
+  VideoPlayerValue clearError() => copyWith(errorDescription: null, errorCode: '0');
 
   @override
   String toString() {
@@ -197,8 +224,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     }
   }
 
-  final StreamController<VideoEvent> videoEventStreamController =
-      StreamController.broadcast();
+  final StreamController<VideoEvent> videoEventStreamController = StreamController.broadcast();
   final Completer<void> _creatingCompleter = Completer<void>();
   int? _textureId;
 
@@ -218,8 +244,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   /// Attempts to open the given [dataSource] and load metadata about the video.
   Future<void> _create(Map<String, dynamic>? quanteecConfig) async {
     _textureId = await _videoPlayerPlatform.create(
-        bufferingConfiguration: bufferingConfiguration,
-        quanteecConfig: quanteecConfig);
+        bufferingConfiguration: bufferingConfiguration, quanteecConfig: quanteecConfig);
     _creatingCompleter.complete(null);
 
     unawaited(_applyLooping());
@@ -236,7 +261,9 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
             duration: event.duration,
             size: event.size,
           );
-          _initializingCompleter.complete(null);
+          if (!_initializingCompleter.isCompleted) {
+            _initializingCompleter.complete(null);
+          }
           _applyPlayPause();
           break;
         case VideoEventType.completed:
@@ -256,10 +283,20 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           break;
 
         case VideoEventType.play:
-          play();
+          // While system PiP owns the AVPlayer, only sync local state — calling
+          // play()/pause() again races the PiP controls and can freeze resume.
+          if (value.isPip) {
+            value = value.copyWith(isPlaying: true);
+          } else {
+            play();
+          }
           break;
         case VideoEventType.pause:
-          pause();
+          if (value.isPip) {
+            value = value.copyWith(isPlaying: false);
+          } else {
+            pause();
+          }
           break;
         case VideoEventType.seek:
           seekTo(event.position);
@@ -268,14 +305,43 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           value = value.copyWith(isPip: true);
           break;
         case VideoEventType.pipStop:
+          // Keep isPlaying if native immediately resumes after expand-to-app.
+          // A teardown pause must not force platform pause once isPip clears.
           value = value.copyWith(isPip: false);
           break;
+        case VideoEventType.displayTurnedOff:
+          // Native already paused Exo/AV; sync local playing flag so PiP
+          // keep-alive listeners do not force play() again.
+          value = value.copyWith(isPlaying: false);
+          break;
         case VideoEventType.nerdStat:
-          value = value.copyWith(isPip: false, nerdStatValue: event.nerdStat);
+          // Do not clear isPip — bitrate/nerd ticks must not end a PiP session.
+          value = value.copyWith(nerdStatValue: event.nerdStat);
           break;
         case VideoEventType.bitrateUpdate:
-          value =
-              value.copyWith(isPip: false, bitrateValue: event.bitrateUpdate);
+          final dynamic raw = event.bitrateUpdate;
+          int estimate = 0;
+          int selectedW = value.selectedVideoWidth;
+          int selectedH = value.selectedVideoHeight;
+          int selectedBr = value.selectedTrackBitrate;
+          if (raw is Map) {
+            final Object? br = raw['bitrate'];
+            if (br is num) estimate = br.round();
+            final Object? w = raw['width'];
+            if (w is num && w > 0) selectedW = w.round();
+            final Object? h = raw['height'];
+            if (h is num && h > 0) selectedH = h.round();
+            final Object? sbr = raw['selectedBitrate'];
+            if (sbr is num && sbr > 0) selectedBr = sbr.round();
+          } else if (raw is num) {
+            estimate = raw.round();
+          }
+          value = value.copyWith(
+            bitrateValue: estimate,
+            selectedVideoWidth: selectedW,
+            selectedVideoHeight: selectedH,
+            selectedTrackBitrate: selectedBr,
+          );
           break;
         case VideoEventType.unknown:
           break;
@@ -283,24 +349,29 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     }
 
     void errorListener(Object object) {
+      if (_isDisposed) return;
       if (object is PlatformException) {
         final PlatformException e = object;
-        value = value.copyWith(errorDescription: '${e.message} ${e.details}');
         value = value.copyWith(
-            errorDescription: '${e.message} ${e.details}',
-            errorCode: e.details);
+          errorDescription: '${e.message} ${e.details}',
+          errorCode: '${e.details ?? e.code}',
+          isPlaying: false,
+        );
       } else {
-        value.copyWith(errorDescription: object.toString());
+        value = value.copyWith(
+          errorDescription: object.toString(),
+          isPlaying: false,
+        );
       }
       _timer?.cancel();
+      // Mid-playback errors: do not completeError — that surfaces as an
+      // unhandled PlatformException when initialize already finished.
       if (!_initializingCompleter.isCompleted) {
         _initializingCompleter.completeError(object);
       }
     }
 
-    _eventSubscription = _videoPlayerPlatform
-        .videoEventsFor(_textureId)
-        .listen(eventListener, onError: errorListener);
+    _eventSubscription = _videoPlayerPlatform.videoEventsFor(_textureId).listen(eventListener, onError: errorListener);
   }
 
   /// Set data source for playing a video from an asset.
@@ -365,6 +436,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
     String? activityName,
     String? clearKey,
     String? videoExtension,
+    Map<String, dynamic>? cmcdConfig,
   }) {
     return _setDataSource(
       DataSource(
@@ -390,6 +462,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
         activityName: activityName,
         clearKey: clearKey,
         videoExtension: videoExtension,
+        cmcdConfig: cmcdConfig,
       ),
     );
   }
@@ -437,8 +510,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
 
     _initializingCompleter = Completer<void>();
 
-    await VideoPlayerPlatform.instance
-        .setDataSource(_textureId, dataSourceDescription);
+    await VideoPlayerPlatform.instance.setDataSource(_textureId, dataSourceDescription);
     return _initializingCompleter.future;
   }
 
@@ -529,8 +601,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
           }
           _updatePosition(newPosition, absolutePosition: newAbsolutePosition);
           if (_seekPosition != null && newPosition != null) {
-            final difference =
-                newPosition.inMilliseconds - _seekPosition!.inMilliseconds;
+            final difference = newPosition.inMilliseconds - _seekPosition!.inMilliseconds;
             if (difference > 0) {
               _seekPosition = null;
             }
@@ -638,14 +709,27 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   /// [height] specifies height of the selected track
   /// [bitrate] specifies bitrate of the selected track
   Future<void> setTrackParameters(int? width, int? height, int? bitrate) async {
-    await _videoPlayerPlatform.setTrackParameters(
-        _textureId, width, height, bitrate);
+    await _videoPlayerPlatform.setTrackParameters(_textureId, width, height, bitrate);
   }
 
-  Future<void> enablePictureInPicture(
-      {double? top, double? left, double? width, double? height}) async {
-    await _videoPlayerPlatform.enablePictureInPicture(
-        textureId, top, left, width, height);
+  Future<void> enablePictureInPicture({double? top, double? left, double? width, double? height}) async {
+    await _videoPlayerPlatform.enablePictureInPicture(textureId, top, left, width, height);
+  }
+
+  /// Android mini → background: arm native onUserLeaveHint / auto-enter PiP.
+  Future<void> setPipEnterOnLeave(bool enabled) async {
+    await _videoPlayerPlatform.setPipEnterOnLeave(textureId, enabled);
+  }
+
+  /// Clear Activity auto-enter even when no [VideoPlayerController] remains.
+  /// Native [setPipEnterOnLeave] is plugin-scoped; a missing texture still clears it.
+  static Future<void> clearPipEnterOnLeaveGlobal() async {
+    await _videoPlayerPlatform.setPipEnterOnLeave(-1, false);
+  }
+
+  /// iOS: force-pause AVPlayer and clear Now Playing (Cast / no local BG audio).
+  Future<void> pauseAndHideMediaSession() async {
+    await _videoPlayerPlatform.pauseAndHideMediaSession(textureId);
   }
 
   Future<void> disablePictureInPicture() async {
@@ -664,6 +748,14 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
       return false;
     }
     return _videoPlayerPlatform.isPictureInPictureEnabled(_textureId);
+  }
+
+  /// Android Activity.isInPictureInPictureMode (not the video isPip event).
+  Future<bool?> isActivityInPictureInPictureMode() async {
+    if (_textureId == null) {
+      return false;
+    }
+    return _videoPlayerPlatform.isActivityInPictureInPictureMode(_textureId);
   }
 
   Future<bool?> checkPipPermission() async {
@@ -755,9 +847,7 @@ class _VideoPlayerState extends State<VideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
-    return _textureId == null
-        ? Container()
-        : _videoPlayerPlatform.buildView(_textureId);
+    return _textureId == null ? Container() : _videoPlayerPlatform.buildView(_textureId);
   }
 }
 

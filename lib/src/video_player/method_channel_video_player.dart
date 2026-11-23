@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:better_player/src/configuration/better_player_buffering_configuration.dart';
 import 'package:better_player/src/core/better_player_utils.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -29,7 +30,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> nerdStat(int? textureId) async{
+  Future<void> nerdStat(int? textureId) async {
     return await _channel.invokeMethod<void>(
       'nerdStat',
       <String, dynamic>{
@@ -39,10 +40,28 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<int?> create({
-    BetterPlayerBufferingConfiguration? bufferingConfiguration,
-    Map<String, dynamic>? quanteecConfig
-  }) async {
+  Future<void> playWhenReadyTrue(int? textureId) async {
+    return await _channel.invokeMethod<void>(
+      'playWhenReadyTrue',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
+  Future<void> playWhenReadyFalse(int? textureId) async {
+    return await _channel.invokeMethod<void>(
+      'playWhenReadyFalse',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
+  Future<int?> create(
+      {BetterPlayerBufferingConfiguration? bufferingConfiguration, Map<String, dynamic>? quanteecConfig}) async {
     late final Map<String, dynamic>? response;
     if (bufferingConfiguration == null) {
       response = await _channel.invokeMapMethod<String, dynamic>('create');
@@ -53,15 +72,12 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'minBufferMs': bufferingConfiguration.minBufferMs,
           'maxBufferMs': bufferingConfiguration.maxBufferMs,
           'bufferForPlaybackMs': bufferingConfiguration.bufferForPlaybackMs,
-          'bufferForPlaybackAfterRebufferMs':
-              bufferingConfiguration.bufferForPlaybackAfterRebufferMs,
+          'bufferForPlaybackAfterRebufferMs': bufferingConfiguration.bufferForPlaybackAfterRebufferMs,
           'quanteecConfig': quanteecConfig
         },
       );
 
-      response = responseLinkedHashMap != null
-          ? Map<String, dynamic>.from(responseLinkedHashMap)
-          : null;
+      response = responseLinkedHashMap != null ? Map<String, dynamic>.from(responseLinkedHashMap) : null;
     }
     return response?['textureId'] as int?;
   }
@@ -111,6 +127,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
           'activityName': dataSource.activityName,
           'clearKey': dataSource.clearKey,
           'videoExtension': dataSource.videoExtension,
+          'cmcdConfig': dataSource.cmcdConfig,
         };
         break;
       case DataSourceType.file:
@@ -229,8 +246,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> setTrackParameters(
-      int? textureId, int? width, int? height, int? bitrate) {
+  Future<void> setTrackParameters(int? textureId, int? width, int? height, int? bitrate) {
     return _channel.invokeMethod<void>(
       'setTrackParameters',
       <String, dynamic>{
@@ -266,9 +282,9 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   @override
   Future<DateTime?> getAbsolutePosition(int? textureId) async {
     final int milliseconds = await _channel.invokeMethod<int>(
-      'absolutePosition',
-      <String, dynamic>{'textureId': textureId},
-    ) ??
+          'absolutePosition',
+          <String, dynamic>{'textureId': textureId},
+        ) ??
         0;
 
     if (milliseconds <= 0) return null;
@@ -283,8 +299,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
-  Future<void> enablePictureInPicture(int? textureId, double? top, double? left,
-      double? width, double? height) async {
+  Future<void> enablePictureInPicture(int? textureId, double? top, double? left, double? width, double? height) async {
     return _channel.invokeMethod<void>(
       'enablePictureInPicture',
       <String, dynamic>{
@@ -298,9 +313,40 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   }
 
   @override
+  Future<void> setPipEnterOnLeave(int? textureId, bool enabled) {
+    return _channel.invokeMethod<void>(
+      'setPipEnterOnLeave',
+      <String, dynamic>{
+        'textureId': textureId,
+        'enabled': enabled,
+      },
+    );
+  }
+
+  @override
+  Future<void> pauseAndHideMediaSession(int? textureId) {
+    return _channel.invokeMethod<void>(
+      'pauseAndHideMediaSession',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
   Future<bool?> isPictureInPictureEnabled(int? textureId) {
     return _channel.invokeMethod<bool>(
       'isPictureInPictureSupported',
+      <String, dynamic>{
+        'textureId': textureId,
+      },
+    );
+  }
+
+  @override
+  Future<bool?> isActivityInPictureInPictureMode(int? textureId) {
+    return _channel.invokeMethod<bool>(
+      'isActivityInPictureInPictureMode',
       <String, dynamic>{
         'textureId': textureId,
       },
@@ -395,9 +441,7 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
 
   @override
   Stream<VideoEvent> videoEventsFor(int? textureId) {
-    return _eventChannelFor(textureId)
-        .receiveBroadcastStream()
-        .map((dynamic event) {
+    return _eventChannelFor(textureId).receiveBroadcastStream().map((dynamic event) {
       late Map<dynamic, dynamic> map;
       if (event is Map) {
         map = event;
@@ -485,19 +529,19 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
             key: key,
           );
 
+        case 'displayTurnedOff':
+          return VideoEvent(
+            eventType: VideoEventType.displayTurnedOff,
+            key: key,
+          );
+
         case 'nerdStat':
           dynamic values = map["values"];
-          return VideoEvent(
-              eventType: VideoEventType.nerdStat,
-              key: key,
-              nerdStat: values);
+          return VideoEvent(eventType: VideoEventType.nerdStat, key: key, nerdStat: values);
 
         case 'bitrateUpdate':
           dynamic values = map["values"];
-          return VideoEvent(
-              eventType: VideoEventType.bitrateUpdate,
-              key: key,
-              bitrateUpdate: values);
+          return VideoEvent(eventType: VideoEventType.bitrateUpdate, key: key, bitrateUpdate: values);
 
         case 'adStarted':
           return VideoEvent(eventType: VideoEventType.adStarted, key: key);
@@ -517,10 +561,20 @@ class MethodChannelVideoPlayer extends VideoPlayerPlatform {
   @override
   Widget buildView(int? textureId) {
     if (defaultTargetPlatform == TargetPlatform.iOS) {
+      // Empty gestureRecognizers → UiKitView steals all touches; Flutter
+      // pull-down-to-mini / tap-to-show-controls never fire on the video.
       return UiKitView(
         viewType: 'com.jhomlala/better_player',
         creationParamsCodec: const StandardMessageCodec(),
         creationParams: {'textureId': textureId!},
+        // DoubleTap is not a OneSequenceGestureRecognizer — omit it.
+        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+          Factory<TapGestureRecognizer>(() => TapGestureRecognizer()),
+          Factory<LongPressGestureRecognizer>(() => LongPressGestureRecognizer()),
+          Factory<VerticalDragGestureRecognizer>(
+            () => VerticalDragGestureRecognizer(),
+          ),
+        },
       );
     } else {
       return Texture(textureId: textureId!);

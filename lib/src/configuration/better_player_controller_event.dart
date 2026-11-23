@@ -13,5 +13,8 @@ enum BetterPlayerControllerEvent {
   setupDataSource,
 
   //Video has started.
-  play
+  play,
+
+  ///Fit or overridden aspect ratio changed.
+  changeFit,
 }

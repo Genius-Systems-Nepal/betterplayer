@@ -15,11 +15,15 @@ enum BetterPlayerEventType {
   controlsHiddenEnd,
   setSpeed,
   changedSubtitles,
+  changedAudioTracks,
   changedTrack,
   changedPlayerVisibility,
   changedResolution,
   pipStart,
   pipStop,
+
+  /// Device display turned off / locked (pause PiP; do not auto-resume).
+  displayTurnedOff,
   setupDataSource,
   bufferingStart,
   bufferingUpdate,
