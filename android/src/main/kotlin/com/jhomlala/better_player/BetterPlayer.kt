@@ -1166,12 +1166,14 @@ internal class BetterPlayer(
         val parametersBuilder = trackSelector.buildUponParameters()
         val auto = width == 0 && height == 0 && bitrate == 0
         manualBitrateLock = !auto
-        // Keep audio (and other) overrides; only touch video.
-        parametersBuilder.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
         if (auto) {
             // Restore adaptive ABR: clear pinned video override + size/bitrate caps.
+            // ExoPlayer 2.17: use TrackSelectionOverrides.Builder (no clearOverridesOfType).
             parametersBuilder.clearVideoSizeConstraints()
             parametersBuilder.setMaxVideoBitrate(Int.MAX_VALUE)
+            parametersBuilder.setTrackSelectionOverrides(
+                TrackSelectionOverrides.Builder().build()
+            )
             trackSelector.setParameters(parametersBuilder)
             logAbr(
                 "setTrack auto=true estimate=$lastBandwidthEstimate " +
@@ -1189,7 +1191,9 @@ internal class BetterPlayer(
         }
         val videoOverride = findVideoTrackOverride(width, height, bitrate)
         if (videoOverride != null) {
-            parametersBuilder.addOverride(videoOverride)
+            parametersBuilder.setTrackSelectionOverrides(
+                TrackSelectionOverrides.Builder().addOverride(videoOverride).build()
+            )
         }
         trackSelector.setParameters(parametersBuilder)
         logAbr(
